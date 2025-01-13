@@ -1,5 +1,5 @@
 <?php
-
+declare(strict_types=1);
 namespace MRBS;
 
 use Error;
@@ -41,6 +41,7 @@ class DB_mysql extends DB
   );
 
   private $db_type = null;
+  private $returns_native_types = null;
   private $supports_multiple_locks = null;
   private $version_comment = null;
 
@@ -88,6 +89,8 @@ class DB_mysql extends DB
         // errors of the type "Syntax error or access violation: 1055 'mrbs.E.start_time' isn't in GROUP BY".
         // TODO: However the proper solution is probably to rewrite the offending queries.
         $this->command("SET sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
+        // Set STRICT_TRANS_TABLES so that we can detect invalid values being inserted in the database
+        $this->command("SET SESSION sql_mode = 'STRICT_TRANS_TABLES'");
       }
       catch (PDOException $e)
       {
@@ -202,17 +205,50 @@ class DB_mysql extends DB
   // Must be called right after an insert on that table!
   //
   // For MySQL we don't need to refer to the passed $table or $field
-  public function insert_id(string $table, string $field)
+  public function insert_id(string $table, string $field): int
   {
-    return $this->dbh->lastInsertId();
+    return (int)$this->dbh->lastInsertId();
   }
 
+
+  // Checks the attribute PDO::ATTR_STRINGIFY_FETCHES
+  private function getStringifyFetches() : bool
+  {
+    // Not all drivers support PDO::ATTR_STRINGIFY_FETCHES
+    try {
+      return $this->getAttribute(PDO::ATTR_STRINGIFY_FETCHES);
+    }
+    catch (PDOException $e) {
+      return false;
+    }
+  }
+
+
+  // Determines whether the driver returns native types (eg a PHP int
+  // for an SQL INT).
+  public function returnsNativeTypes() : bool
+  {
+    if (!isset($this->returns_native_types))
+    {
+      // MySQL will return native types if PDO::ATTR_STRINGIFY_FETCHES is false
+      // and we're using a native driver and (the PHP version is at least 8.1 or
+      // PDO::ATTR_EMULATE_PREPARES is false).
+      // See https://stackoverflow.com/questions/1197005/how-to-get-numeric-types-from-mysql-using-pdo
+      // and https://stackoverflow.com/questions/20079320/how-do-i-return-integer-and-numeric-columns-from-mysql-as-integers-and-numerics
+      $this->returns_native_types =
+        !$this->getStringifyFetches()&&
+        str_contains($this->getAttribute(PDO::ATTR_CLIENT_VERSION), 'mysqlnd') &&
+        ((version_compare(PHP_VERSION, '8.1.0') >= 0) || !$this->getAttribute(PDO::ATTR_EMULATE_PREPARES));
+    }
+
+    return $this->returns_native_types;
+  }
 
   // Determines whether the database supports multiple locks.
   // This method should not be called for the first time while
   // locks are in place, because it will release them.
   // WARNING! This method should not be used as RELEASE_ALL_LOCKS
-  //  is not supportedby MariaDB Galera Cluster.
+  //  is not supported by MariaDB Galera Cluster.
   public function supportsMultipleLocks() : bool
   {
     if (!isset($this->supports_multiple_locks))
@@ -427,6 +463,11 @@ class DB_mysql extends DB
       {
         $this->db_type = self::DB_PERCONA;
       }
+      // The Altervista.org hosting platform will give this version comment
+      elseif ($this->versionComment() == 'Source distribution')
+      {
+        $this->db_type = self::DB_MYSQL;
+      }
       else
       {
         if ($debug)
@@ -495,9 +536,9 @@ class DB_mysql extends DB
   // Check if a table exists
   public function table_exists(string $table) : bool
   {
-    $res = $this->query1("SHOW TABLES LIKE ?", array($table));
+    $res = $this->query("SHOW TABLES LIKE ?", array($table));
 
-    return !($res == -1);
+    return ($res->count() > 0);
   }
 
 
@@ -522,6 +563,7 @@ class DB_mysql extends DB
     // Map MySQL types on to a set of generic types
     $nature_map = array(
       'bigint'      => 'integer',
+      'blob'        => 'binary',
       'char'        => 'character',
       'date'        => 'timestamp',
       'datetime'    => 'timestamp',
@@ -529,7 +571,9 @@ class DB_mysql extends DB
       'double'      => 'real',
       'float'       => 'real',
       'int'         => 'integer',
+      'longblob'    => 'binary',
       'longtext'    => 'character',
+      'mediumblob'  => 'binary',
       'mediumint'   => 'integer',
       'mediumtext'  => 'character',
       'numeric'     => 'decimal',
@@ -537,6 +581,7 @@ class DB_mysql extends DB
       'text'        => 'character',
       'time'        => 'timestamp',
       'timestamp'   => 'timestamp',
+      'tinyblob'    => 'binary',
       'tinyint'     => 'integer',
       'tinytext'    => 'character',
       'varchar'     => 'character',
@@ -623,14 +668,14 @@ class DB_mysql extends DB
   // Generate non-standard SQL for LIMIT clauses:
   public function syntax_limit(int $count, int $offset) : string
   {
-   return " LIMIT $offset,$count ";
+   return "LIMIT $offset,$count";
   }
 
 
   // Generate non-standard SQL to output a TIMESTAMP as a Unix-time:
   public function syntax_timestamp_to_unix(string $fieldname) : string
   {
-    return " UNIX_TIMESTAMP($fieldname) ";
+    return "UNIX_TIMESTAMP($fieldname)";
   }
 
 
@@ -651,7 +696,7 @@ class DB_mysql extends DB
     // authenticating a user against an external database.  See the post at
     // https://stackoverflow.com/questions/5629111/how-can-i-make-sql-case-sensitive-string-comparison-on-mysql#answer-56283818
     // for an explanation of the query.
-    return " " . $this->quote($fieldname) . "=CONVERT(? using utf8mb4) COLLATE utf8mb4_bin";
+    return $this->quote($fieldname) . "=CONVERT(? using utf8mb4) COLLATE utf8mb4_bin";
   }
 
   // Generate non-standard SQL to match a string anywhere in a field's value
@@ -670,7 +715,7 @@ class DB_mysql extends DB
 
     $params[] = "%$string%";
 
-    return " $fieldname LIKE ? ";
+    return "$fieldname LIKE ?";
   }
 
 

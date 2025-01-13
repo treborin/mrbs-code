@@ -39,7 +39,7 @@ function need_to_send_mail() : bool
 }
 
 
-function get_mail_lang() : string
+function get_mail_locale() : string
 {
   global $mail_settings;
 
@@ -47,16 +47,16 @@ function get_mail_lang() : string
 }
 
 
-function get_mail_locale()
+function get_mail_os_locale()
 {
-  static $mail_locale;
+  static $mail_os_locale;
 
-  if (!isset($mail_locale))
+  if (!isset($mail_os_locale))
   {
-    $mail_locale = System::getOSlocale(get_mail_lang());
+    $mail_os_locale = System::getOSlocale(get_mail_locale());
   }
 
-  return $mail_locale;
+  return $mail_os_locale;
 }
 
 // Get localized (for email) field name for a user defined table column
@@ -102,7 +102,7 @@ function getMailPeriodDateString(int $t, int $mod_time=0) : array
   $mailperiod = $periods[$p_num];
 
   // The separator is a ',' as a '-' leads to an ambiguous display in report.php when showing end times.
-  return array($p_num, $mailperiod . ', ' . datetime_format($datetime_formats['date'], $t, get_mail_lang()));
+  return array($p_num, $mailperiod . ', ' . datetime_format($datetime_formats['date'], $t, get_mail_locale()));
 }
 
 // }}}
@@ -120,7 +120,7 @@ function getMailTimeDateString(int $t, bool $inc_time=true) : string
   global $datetime_formats;
 
   $format = ($inc_time) ? $datetime_formats['date_and_time'] : $datetime_formats['date'];
-  return datetime_format($format, $t, get_mail_lang());
+  return datetime_format($format, $t, get_mail_locale());
 }
 
 
@@ -192,7 +192,7 @@ function get_approvers_email($room_id) : string
 // Get the area_admin_email for an entry $id
 // If $series is set this is an entry in the repeat table, otherwise the entry table
 // Returns an empty string in the case of an error
-function get_area_admin_email($id, $series=FALSE)
+function get_area_admin_email($id, bool $series=false) : string
 {
   $id_table = ($series) ? "rep" : "e";
 
@@ -208,16 +208,16 @@ function get_area_admin_email($id, $series=FALSE)
              AND r.id={$id_table}.room_id
              AND a.id=r.area_id
            LIMIT 1";
-  $email = db()->query1($sql, array($id));
+  $email = db()->query_scalar_non_bool($sql, array($id));
 
-  return ($email == -1) ? '' : $email;
+  return (!isset($email) || ($email === false)) ? '' : $email;
 }
 
 
 // Get the room_admin_email for an entry $id
 // If $series is set this is an entry in the repeat table, otherwise the entry table
 // Returns an empty string in the case of an error
-function get_room_admin_email($id, $series=FALSE)
+function get_room_admin_email($id, bool $series=false) : string
 {
   $id_table = ($series) ? "rep" : "e";
 
@@ -232,9 +232,9 @@ function get_room_admin_email($id, $series=FALSE)
   $sql .= "WHERE {$id_table}.id=?
              AND r.id={$id_table}.room_id
            LIMIT 1";
-  $email = db()->query1($sql, array($id));
+  $email = db()->query_scalar_non_bool($sql, array($id));
 
-  return ($email == -1) ? '' : $email;
+  return (!isset($email) || ($email === false)) ? '' : $email;
 }
 
 
@@ -914,15 +914,12 @@ function notifyAdminOnBooking(array $data, array $mail_previous, bool $new_entry
 
   // Create the text body
   $compare = !$new_entry;
-  $text_body = array();
-  $text_body['content'] = create_body($data, $mail_previous, $compare, $series, $action, $start_times, false, $note);
+  $text_body = create_body($data, $mail_previous, $compare, $series, $action, $start_times, false, $note);
 
   // Create the HTML body
-  $html_body = array();
   if ($mail_settings['html'])
   {
-    $html_body['content'] = create_body($data, $mail_previous, $compare, $series, $action, $start_times, true, $note);
-    $html_body['cid'] = generate_global_uid("html");
+    $html_body = create_body($data, $mail_previous, $compare, $series, $action, $start_times, true, $note);
   }
 
   // Create the iCalendar if required
@@ -950,7 +947,7 @@ function notifyAdminOnBooking(array $data, array $mail_previous, bool $new_entry
       $addresses,
       $subject,
       $text_body,
-      $html_body,
+      $html_body ?? null,
       $attachment,
       get_mail_charset()
     );
@@ -1011,15 +1008,12 @@ function notifyAdminOnDelete($data, $start_times, bool $series=false, string $ac
   }
 
   // Create the text body
-  $text_body = array();
-  $text_body['content'] = create_body($data, null, false, $series, $action, $start_times, false, $note);
+  $text_body = create_body($data, null, false, $series, $action, $start_times, false, $note);
 
   // Create the HTML body
-  $html_body = array();
   if ($mail_settings['html'])
   {
-    $html_body['content'] = create_body($data, null, false, $series, $action, $start_times, true, $note);
-    $html_body['cid'] = generate_global_uid("html");
+    $html_body = create_body($data, null, false, $series, $action, $start_times, true, $note);
   }
 
   // Set up the attachment
@@ -1037,7 +1031,7 @@ function notifyAdminOnDelete($data, $start_times, bool $series=false, string $ac
       $addresses,
       $subject,
       $text_body,
-      $html_body,
+      $html_body ?? null,
       $attachment,
       get_mail_charset()
     );

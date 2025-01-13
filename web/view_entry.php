@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Form\ElementFieldset;
@@ -14,7 +15,7 @@ require_once "mrbs_sql.inc";
 require_once "functions_view.inc";
 
 
-function generate_registrant_table($row, $previous_page=null)
+function generate_registrant_table(array $row, ?string $previous_page=null) : void
 {
   echo "<div id=\"registrant_list\" class=\"datatable_container\">\n";
   echo "<table id=\"registrants\" class=\"admin_table display\">\n";
@@ -77,23 +78,19 @@ function generate_registrant_table($row, $previous_page=null)
         }
       }
       $sort_name = get_sortable_name($display_name);
-      $have_email = isset($email) && ($email !== '');
       echo '<td data-order="' . htmlspecialchars($sort_name) . '">';
+      $display_name_html = htmlspecialchars($display_name);
       // Add a mailto: link if we've got an email address
-      if ($have_email)
+      if (isset($email) && ($email !== ''))
       {
-        echo '<a href="mailto:' . htmlspecialchars($email) . '">';
+        $display_name_html = '<a href="mailto:' . htmlspecialchars($email) . '">' . $display_name_html . '</a>';
       }
-      echo htmlspecialchars($display_name);
-      if ($have_email)
-      {
-        echo '</a>';
-      }
+      echo $display_name_html;
       echo '</td>';
     }
     // Time of registration
     $time = time_date_string($registrant['registered']);
-    echo '<td data-order="' . htmlspecialchars($registrant['registered']) . '">' . htmlspecialchars($time) . '</td>';
+    echo '<td data-order="' . intval($registrant['registered']) . '">' . htmlspecialchars($time) . '</td>';
     echo "</tr>\n";
   }
 
@@ -130,7 +127,7 @@ function get_returl(?string $previous_page=null) : string
 }
 
 
-function generate_cancel_registration_button(array $row, array $registrant, $label_text, $previous_page=null, $as_field=false)
+function generate_cancel_registration_button(array $row, array $registrant, string $label_text, ?string $previous_page=null, bool $as_field=false) : void
 {
   global $area, $room;
 
@@ -140,9 +137,8 @@ function generate_cancel_registration_button(array $row, array $registrant, $lab
     return;
   }
 
-  $form = new Form();
-  $form->setAttributes(array('action' => multisite('registration_handler.php'),
-    'method' => 'post'));
+  $form = new Form(Form::METHOD_POST);
+  $form->setAttributes(array('action' => multisite('registration_handler.php')));
 
   if ($as_field)
   {
@@ -184,7 +180,7 @@ function generate_cancel_registration_button(array $row, array $registrant, $lab
 }
 
 
-function generate_register_button($row, $previous_page=null)
+function generate_register_button(array $row, ?string $previous_page=null) : void
 {
   global $area, $room;
 
@@ -197,10 +193,9 @@ function generate_register_button($row, $previous_page=null)
   $mrbs_user = session()->getCurrentUser();
   $can_register_others = can_register_others($row['room_id']);
 
-  $form = new Form();
+  $form = new Form(Form::METHOD_POST);
   $form->setAttributes(array('action' => multisite('registration_handler.php'),
-                             'class'  => 'standard',
-                             'method' => 'post'));
+                             'class'  => 'standard'));
 
   // Hidden inputs
   $form->addHiddenInputs(array(
@@ -243,7 +238,7 @@ function generate_register_button($row, $previous_page=null)
 }
 
 
-function generate_event_registration($row, $previous_page=null)
+function generate_event_registration(array $row, ?string $previous_page=null) : void
 {
   global $auth;
 
@@ -282,13 +277,13 @@ function generate_event_registration($row, $previous_page=null)
   {
     echo '<tr>';
     echo '<td>' . htmlspecialchars(get_vocab('registrant_limit')) . '</td>';
-    echo '<td>' . htmlspecialchars($row['registrant_limit']) . '</td>';
+    echo '<td>' . intval($row['registrant_limit']) . '</td>';  // Redundant escaping, just in case
     echo "</tr>\n";
   }
 
   echo '<tr>';
   echo '<td>' . htmlspecialchars(get_vocab('n_registered')) . '</td>';
-  echo '<td>' . htmlspecialchars($n_registered) . '</td>';
+  echo '<td>' . intval($n_registered) . '</td>';  // Redundant escaping, just in case
   echo "</tr>\n";
   echo "</tbody>\n";
   echo "</table>\n";
@@ -305,41 +300,47 @@ function generate_event_registration($row, $previous_page=null)
 
   // Display registration information and buttons for this user
   $mrbs_user = session()->getCurrentUser();
-  if (!$can_register_others && in_arrayi($mrbs_user->username,
-                                         array_column($row['registrants'], 'username')))
+  // Doesn't make sense to have anonymous registration at the moment.
+  // You'd have to have a different kind of registration form - and
+  // also think about who is allowed to cancel.
+  if (isset($mrbs_user) && ($mrbs_user->username !== ''))
   {
-    echo '<p>' . htmlspecialchars(get_vocab('already_registered')) . "</p>\n";
-    foreach ($row['registrants'] as $registrant)
+    if (!$can_register_others && in_arrayi($mrbs_user->username,
+        array_column($row['registrants'], 'username')))
     {
-      if (strcasecmp_locale($mrbs_user->username, $registrant['username']) === 0)
+      echo '<p>' . htmlspecialchars(get_vocab('already_registered')) . "</p>\n";
+      foreach ($row['registrants'] as $registrant)
       {
-        $this_registrant = $registrant;
-        break;
+        if (strcasecmp_locale($mrbs_user->username, $registrant['username']) === 0)
+        {
+          $this_registrant = $registrant;
+          break;
+        }
       }
-    }
-    // If they can see others they'll have a delete button against their name.  Otherwise
-    // we'll need to provide one for them.
-    if (!$can_see_others)
-    {
-      generate_cancel_registration_button(
+      // If they can see others they'll have a delete button against their name.  Otherwise
+      // we'll need to provide one for them.
+      if (!$can_see_others)
+      {
+        generate_cancel_registration_button(
           $row,
           $this_registrant,
           get_vocab('cancel_registration'),
           $previous_page,
           true
         );
-    }
-  }
-  else
-  {
-    if (empty($row['registrant_limit_enabled']) ||
-      ($row['registrant_limit'] > $n_registered))
-    {
-      generate_register_button($row, $previous_page);
+      }
     }
     else
     {
-      echo '<p>' . htmlspecialchars(get_vocab('event_full')) . "</p>\n";
+      if (empty($row['registrant_limit_enabled']) ||
+          ($row['registrant_limit'] > $n_registered))
+      {
+        generate_register_button($row, $previous_page);
+      }
+      else
+      {
+        echo '<p>' . htmlspecialchars(get_vocab('event_full')) . "</p>\n";
+      }
     }
   }
 
@@ -356,16 +357,15 @@ function generate_event_registration($row, $previous_page=null)
 //
 //    Optional parameters
 //      button_attributes   An array of attributes to be used for the button.
-function generate_button(array $params, array $button_attributes=array())
+function generate_button(array $params, array $button_attributes=array()) : void
 {
   // Note that until IE supports the form attribute on the button tag, we can't
   // use a <button> here and have to use the <input type="submit"> to create the
   // button.   This unfortunately means that styling options on the button are limited.
 
-  $form = new Form();
+  $form = new Form(Form::METHOD_POST);
 
-  $attributes = array('action' => $params['action'],
-                      'method' => 'post');
+  $attributes = array('action' => $params['action']);
 
   $form->setAttributes($attributes);
 
@@ -383,7 +383,7 @@ function generate_button(array $params, array $button_attributes=array())
 
 
 // Generates the Approve, Reject and More Info buttons
-function generateApproveButtons($id, $series)
+function generateApproveButtons(int $id, bool $series) : void
 {
   global $returl;
   global $entry_info_time, $entry_info_user, $repeat_info_time, $repeat_info_user;
@@ -444,7 +444,7 @@ function generateApproveButtons($id, $series)
   echo "</tr>\n";
 }
 
-function generateOwnerButtons($id, $series)
+function generateOwnerButtons(int $id, bool $series) : void
 {
   global $mrbs_username, $create_by, $awaiting_approval, $area;
   global $reminders_enabled, $last_reminded, $reminder_interval;
@@ -453,9 +453,10 @@ function generateOwnerButtons($id, $series)
   // Remind button if you're the owner AND there's a booking awaiting
   // approval AND sufficient time has passed since the last reminder
   // AND we want reminders in the first place
-  if (($reminders_enabled) &&
+  if ($reminders_enabled &&
+      isset($mrbs_username) &&
       (strcasecmp_locale($mrbs_username, $create_by) === 0) &&
-      ($awaiting_approval) &&
+      $awaiting_approval &&
       (working_time_diff(time(), $last_reminded) >= $reminder_interval))
   {
     echo "<tr>\n";
@@ -483,22 +484,21 @@ function generateOwnerButtons($id, $series)
   }
 }
 
-function generateTextArea($form_action, $id, $series, $action_type, $returl, $submit_value, $caption, $value='')
+function generateTextArea(string $form_action, int $id, bool $series, string $action_type, string $returl, string $submit_value, string $caption, string $value='') : void
 {
   echo "<tr><td id=\"caption\" colspan=\"2\">$caption</td></tr>\n";
   echo "<tr>\n";
   echo "<td id=\"note\" class=\"no_suffix\" colspan=\"2\">\n";
 
-  $form = new Form();
+  $form = new Form(Form::METHOD_POST);
 
-  $attributes = array('action' => $form_action,
-                      'method' => 'post');
+  $attributes = array('action' => $form_action);
 
   $form->setAttributes($attributes);
 
   // Hidden inputs
   $hidden_inputs = array('id'     => $id,
-                         'series' => $series,
+                         'series' => ($series) ? 1 : 0,
                          'returl' => $returl,
                          'action' => $action_type);
   $form->addHiddenInputs($hidden_inputs);
@@ -532,7 +532,7 @@ function generateTextArea($form_action, $id, $series, $action_type, $returl, $su
 // If $series is TRUE, it means that the $id is the id of an
 // entry in the repeat table.  Otherwise it's from the entry table.
 $id = get_form_var('id', 'int');
-$series = get_form_var('series', 'bool');
+$series = get_form_var('series', 'bool', false);
 $action = get_form_var('action', 'string');
 $returl = get_form_var('returl', 'string');
 $error = get_form_var('error', 'string');
@@ -622,7 +622,7 @@ $keep_private = (is_private_event($private) && !$writeable);
 $last_reminded = (empty($row['reminded'])) ? $row['last_updated'] : $row['reminded'];
 
 
-if ($series == 1)
+if ($series)
 {
   $repeat_id = $id;  // Save the repeat_id
   // I also need to set $id to the value of a single entry as it is a
@@ -740,15 +740,6 @@ $context = array(
 
 print_header($context);
 
-if (empty($series))
-{
-  $series = 0;
-}
-else
-{
-  $series = 1;
-}
-
 // Now that we know all the data we start drawing it
 
 echo "<h3" . (($keep_private && $is_private_field['entry.name']) ? " class=\"private\"" : "") . ">\n";
@@ -836,7 +827,7 @@ if ($approval_enabled && !$room_disabled && $awaiting_approval)
       }
     }
     // Buttons for the owner of this booking
-    elseif (strcasecmp_locale($mrbs_username, $create_by) === 0)
+    elseif (isset($mrbs_username) && strcasecmp_locale($mrbs_username, $create_by) === 0)
     {
       generateOwnerButtons($id, $series);
     }
@@ -873,7 +864,7 @@ if (!$room_disabled)
     // reason in a tooltip, rather than a complete list.  [Note: if the entry is
     // deletable but the series is not, the series button will not be disabled.  This
     // is something that needs to be fixed in the future.]
-    $violations = mrbsCheckPolicy($row, false, false, true);
+    $violations = mrbsCheckPolicy($row, null, null, true);
 
     if (empty($violations['errors']))
     {
@@ -912,7 +903,7 @@ if (!$room_disabled)
           isset($repeat_id) &&
           series_has_registrants($repeat_id))
       {
-        $button_attributes['onclick'] = "return confirm('" . escape_js(get_vocab("confirm_edit_series")) . "');";
+        $button_attributes['onclick'] = "return confirm('" . get_js_vocab("confirm_edit_series") . "');";
       }
       generate_button($params, $button_attributes);
       echo "</div>\n";
@@ -931,7 +922,7 @@ if (!$room_disabled)
       echo "<div>\n";
       if (empty($button_attributes['disabled']))
       {
-        $button_attributes['onclick'] = "return confirm('" . escape_js(get_vocab('confirmdel')) . "');";
+        $button_attributes['onclick'] = "return confirm('" . get_js_vocab('confirmdel') . "');";
       }
       $params = array(
           'action' => multisite('del_entry.php'),
@@ -949,7 +940,7 @@ if (!$room_disabled)
       echo "<div>\n";
       if (empty($button_attributes['disabled']))
       {
-        $button_attributes['onclick'] = "return confirm('" . escape_js(get_vocab('confirmdel_series')) . "');";
+        $button_attributes['onclick'] = "return confirm('" . get_js_vocab('confirmdel_series') . "');";
       }
       $params = array(
           'action' => multisite("del_entry.php?day=$day&month=$month&year=$year"),

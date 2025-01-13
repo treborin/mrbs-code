@@ -1,11 +1,14 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
-// Note that we are using \MRBS\Locale because \Locale has some bugs in it (and also
+// Note that we are using MRBS\Intl\Locale because \Locale has some bugs in it (and also
 // isn't always installed).
 
 use IntlDateFormatter;
-use IntlDatePatternGenerator;
+use MRBS\Intl\IntlDateFormatterFactory;
+use MRBS\Intl\IntlDatePatternGenerator;
+use MRBS\Intl\Locale;
 use PHPMailer\PHPMailer\PHPMailer;
 
 require_once "functions.inc";
@@ -140,7 +143,7 @@ function using_rtl_lang() : bool
 
 
 // Converts a locale to standard BCP 47 format
-function convert_to_BCP47($locale)
+function convert_to_BCP47(?string $locale) : ?string
 {
   if (!isset($locale))
   {
@@ -170,7 +173,9 @@ function set_mrbs_locale($locale)
   {
     // $os_locale will be an array
     $message = "Server failed to set locale to " . json_encode($os_locale) .
-               " for language tag '$locale'.";
+               " for language tag '$locale'.  Either install the missing locale" .
+               ' or set $override_locale in your MRBS config.inc.php file to a' .
+               ' locale that is available on your server.';
     trigger_error($message, E_USER_NOTICE);
 
     if (false === setlocale(LC_ALL, array('C.UTF-8', 'C.utf-8', 'C.utf8', 'C')))
@@ -292,7 +297,7 @@ function get_lang_preferences() : array
 // Note: the first time this function is called, it should be called with a $locale.
 // Subsequent calls will just return the static $lang variable which was calculated on
 // the first call
-function get_mrbs_lang(string $locale=null)
+function get_mrbs_lang(?string $locale=null)
 {
   global $disable_automatic_language_changing,
          $default_language_tokens,
@@ -462,7 +467,7 @@ function get_langtags(string $dir, string $prefix='', string $suffix='') : array
 //
 // The file names are assumed to be of the form $prefix . $lang . $suffix, eg
 // 'datepicker-en-GB.js'
-function get_best_lang_file(string $dir, string $prefix='', string $suffix='', array $default_langtags=null, array $lang_map=null) : ?string
+function get_best_lang_file(string $dir, string $prefix='', string $suffix='', ?array $default_langtags=null, ?array $lang_map=null) : ?string
 {
   if (!is_dir($dir))
   {
@@ -698,7 +703,7 @@ function get_bom(string $charset) : string
 // [Maybe in the future we should switch to using the MessageFormatter
 //  class as it is more powerful.   However the Intl extension isn't present
 //  in all PHP installations and so the class would have to be emulated]
-function get_vocab(string $tag) : string
+function get_vocab(string $tag, ...$values) : string
 {
   global $vocab;
 
@@ -708,24 +713,45 @@ function get_vocab(string $tag) : string
     return $tag;
   }
 
-  $args = func_get_args();
-  $args[0] = $vocab[$tag];
+  return (count($values) === 0) ? $vocab[$tag] : sprintf($vocab[$tag], ...$values);
+}
 
-  return call_user_func_array('sprintf', $args);
+
+function get_mail_lang() : ?string
+{
+  global $mail_settings, $default_language_tokens;
+
+  static $mail_lang;
+
+  if (!isset($mail_lang))
+  {
+    $available_languages = get_langtags(MRBS_ROOT . '/lang', 'lang.');
+    $mail_lang = Locale::lookup($available_languages, $mail_settings['admin_lang'], false, $default_language_tokens ?? 'en');
+  }
+
+  return $mail_lang;
+}
+
+
+// Same as get_vocab(), but escapes the result for use in JavaScript
+function get_js_vocab(string $tag, ...$values) : string
+{
+  return escape_js(get_vocab($tag, ...$values));
 }
 
 
 // Same as get_vocab(), but uses the mailing language
-function get_mail_vocab(string $tag) : string
+function get_mail_vocab(string $tag, ...$values) : string
 {
-  global $vocab, $mail_settings;
+  global $vocab;
 
   static $mail_vocab = null;
 
   if (!isset($mail_vocab))
   {
     $web_vocab = $vocab;   // Save $vocab before it gets overwritten
-    set_vocab($mail_settings['admin_lang']);
+    // Get the best language available for mail
+    set_vocab(get_mail_lang());
     $mail_vocab = $vocab;
     $vocab = $web_vocab;  // Restore $vocab
   }
@@ -736,9 +762,7 @@ function get_mail_vocab(string $tag) : string
     return $tag;
   }
 
-  $args = func_get_args();
-  $args[0] = $mail_vocab[$tag];
-  $result = call_user_func_array('sprintf', $args);
+  $result = (count($values) === 0) ? $mail_vocab[$tag] : sprintf($mail_vocab[$tag], ...$values);
 
   return str_replace('&nbsp;', ' ', $result);
 }
@@ -767,8 +791,15 @@ function get_loc_field_name(string $table, string $name) : string
 }
 
 
-function datetime_format(array $format, int $timestamp=null, string $locale=null) : string
+function datetime_format(array $format, ?int $timestamp=null, ?string $locale=null) : string
 {
+  global $icu_override, $timezone;
+
+  if (!isset($timestamp))
+  {
+    $timestamp = time();
+  }
+
   if (!isset($locale))
   {
     $locale = get_mrbs_locale();
@@ -785,20 +816,40 @@ function datetime_format(array $format, int $timestamp=null, string $locale=null
     $pattern = $format['pattern'] ?? null;
   }
 
-  $formatter = new IntlDateFormatter(
+  $formatter = IntlDateFormatterFactory::create(
     $locale,
     $format['date_type'] ?? IntlDateFormatter::FULL,
     $format['time_type'] ?? IntlDateFormatter::FULL,
     null, null, $pattern
   );
 
-  return $formatter->format($timestamp ?? time());
+  // If we're overriding the ICU value(s) then use those, provided that we're able to make use
+  // of them with the IntlCalendar and (standard, not emulated - hence the check for the loaded
+  // extension, rather than whether the class exists, which it always will) IntlDateFormatter classes.
+  if (isset($icu_override[$locale]) && extension_loaded('intl') && class_exists('IntlCalendar'))
+  {
+    $cal = \IntlCalendar::createInstance($timezone, $locale);
+    {
+      if (isset($icu_override[$locale]['first_day_of_week']))
+      {
+        $cal->setFirstDayOfWeek($icu_override[$locale]['first_day_of_week']);
+      }
+      if (isset($icu_override[$locale]['minimal_days_in_first_week']))
+      {
+        $cal->setMinimalDaysInFirstWeek($icu_override[$locale]['minimal_days_in_first_week']);
+      }
+    }
+    $cal->setTime($timestamp * 1000);
+    return $formatter->format($cal);
+  }
+
+  return $formatter->format($timestamp);
 }
 
 
 // Determines whether a locale (default the current locale) uses a 12-hour clock.
 // Returns NULL if it can't be determined.
-function is_ampm(string $locale=null) : ?bool
+function is_ampm(?string $locale=null) : ?bool
 {
   global $datetime_formats;
 
@@ -816,7 +867,7 @@ function is_ampm(string $locale=null) : ?bool
   // Otherwise get the pattern that would be used by default.
   else
   {
-    $formatter = new IntlDateFormatter(
+    $formatter = IntlDateFormatterFactory::create(
       $locale,
       $format['date_type'] ?? IntlDateFormatter::NONE,
       $format['time_type'] ?? IntlDateFormatter::SHORT
@@ -847,9 +898,11 @@ function utf8_substr_old(string $str, int $start, ?int $length=null) : string
 // UTF-8 compatible substr function
 function utf8_substr(string $str, int $start, ?int $length=null) : string
 {
-  // If we have mb_substr, use it - it's much quicker than our
-  // routines, as it's native code
-  if (function_exists('mb_substr'))
+  // If we have mb_substr, use it - it's much quicker than our routines, as it's native code.
+  // Note that we need to check for both 'mb_substr' and 'mb_detect_encoding' in case
+  // we are working with WordPress, which has a compatibility library that includes
+  // mb_substr() but not mb_detect_encoding().
+  if (function_exists('mb_substr') && function_exists('mb_detect_encoding'))
   {
     $encoding = mb_detect_encoding($str);
     return mb_substr($str, $start, $length, $encoding);

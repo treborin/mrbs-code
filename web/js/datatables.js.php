@@ -1,15 +1,11 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require "../defaultincludes.inc";
 
 http_headers(array("Content-type: application/x-javascript"),
   60*30);  // 30 minute expiry
-
-if ($use_strict)
-{
-  echo "'use strict';\n";
-}
 
 // See https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.pagesetup?view=openxml-2.8.1
 define('EXCEL_PAGE_SIZES', array(
@@ -36,7 +32,11 @@ else
 {
   $excel_paper_size = $excel_default_paper;
 }
+?>
 
+'use strict';
+
+<?php
 // Actions to take once the datatable's initialisation is complete.
 // Remember that some of the table initialisation operations, eg loading of the
 // language file, are asynchronous.
@@ -95,7 +95,9 @@ var extractEmailAddresses = function(dt, columnSelector, sort) {
   $.each(dt.columns(columnSelector).data(), function (i, column) {
     $.each(column, function (j, value) {
       try {
-        var href = $(value).attr('href');
+        var valueObject = $(value);
+        <?php // Need to search for an href in both this element and its descendants ?>
+        var href = valueObject.find('a').add(valueObject.filter('a')).attr('href');
         if ((href !== undefined) && href.startsWith(scheme)) {
           var address = href.substring(scheme.length);
           if ((address !== '') && !result.includes(address)) {
@@ -117,11 +119,11 @@ var extractEmailAddresses = function(dt, columnSelector, sort) {
 
   navigator.clipboard.writeText(result.join(', '))
     .then(() => {
-      message = '<?php echo get_vocab('unique_addresses_copied')?>';
+      message = '<?php echo get_js_vocab('unique_addresses_copied')?>';
       message = message.replace('%d', result.length.toString());
     })
     .catch((err) => {
-      message = '<?php echo get_vocab('clipboard_copy_failed')?>';
+      message = '<?php echo get_js_vocab('clipboard_copy_failed')?>';
       console.error(err);
     })
     .finally(() => {
@@ -173,16 +175,25 @@ function makeDataTable(id, specificOptions, fixedColumnsOptions)
       exportOptions: {
         columns: ':visible',
         format: {
-          body: function ( data, row, column, node ) {
-            <?php // First of all get the default export data ?>
-            var result = $.fn.dataTable.Buttons.stripData(data);
+          body: function (data, row, column, node) {
+            var div = $('<div>' + data + '</div>');
+            <?php
+            // Remove any elements used for sorting, which are all <span>s that don't
+            // have a class of 'normal' (which the CSS makes visible). Note that we cannot
+            // just remove :hidden elements because that would also remove everything that's
+            // not on the current page and visible on screen.
+            // (We can get rid of this step when we move to using orthogonal data.)
+            ?>
+            div.find('span:not(.normal)').remove();
+            <?php // Apply the default export data stripping ?>
+            var result = $.fn.dataTable.Buttons.stripData(div.html());
             <?php
             // If that is the empty string then it may be that the data is actually a form
             // and the text we want is the text in the submit button.
             ?>
             if (result === '')
             {
-              var value = $('<div>' + data + '</div>').find('input[type="submit"]').attr('value');
+              var value = div.find('input[type="submit"]').attr('value');
               if (value !== undefined)
               {
                 result = value;
@@ -220,9 +231,9 @@ function makeDataTable(id, specificOptions, fixedColumnsOptions)
   <?php // Set up the default options ?>
   defaultOptions = {
     buttons: [{extend: 'colvis',
-               text: '<?php echo escape_js(get_vocab("show_hide_columns")) ?>'}],
+               text: '<?php echo get_js_vocab("show_hide_columns") ?>'}],
     deferRender: true,
-    lengthMenu: [ [10, 25, 50, 100, -1], [10, 25, 50, 100, '<?php echo escape_js(get_vocab('dt_all')) ?>'] ],
+    lengthMenu: [ [10, 25, 50, 100, -1], [10, 25, 50, 100, '<?php echo get_js_vocab('dt_all') ?>'] ],
     paging: true,
     pageLength: 25,
     pagingType: 'full_numbers',
@@ -256,15 +267,15 @@ function makeDataTable(id, specificOptions, fixedColumnsOptions)
     defaultOptions.buttons = defaultOptions.buttons.concat(
       $.extend(true, {}, buttonCommon, {
         extend: 'copy',
-        text: '<?php echo escape_js(get_vocab('copy')) ?>'
+        text: '<?php echo get_js_vocab('copy') ?>'
       }),
       $.extend(true, {}, buttonCommon, {
         extend: 'csv',
-        text: '<?php echo escape_js(get_vocab('csv')) ?>'
+        text: '<?php echo get_js_vocab('csv') ?>'
       }),
       $.extend(true, {}, buttonCommon, {
         extend: 'excel',
-        text: '<?php echo escape_js(get_vocab('excel')) ?>',
+        text: '<?php echo get_js_vocab('excel') ?>',
         customize: customizeExcel
       }),
       $.extend(true, {}, buttonCommon, {
@@ -273,13 +284,13 @@ function makeDataTable(id, specificOptions, fixedColumnsOptions)
         // https://github.com/meeting-room-booking-system/mrbs-code/issues/3512
         ?>
         extend: 'pdfHtml5',
-        text: '<?php echo escape_js(get_vocab('pdf')) ?>',
+        text: '<?php echo get_js_vocab('pdf') ?>',
         orientation: '<?php echo $pdf_default_orientation ?>',
         pageSize: '<?php echo $pdf_default_paper ?>'
       }),
       $.extend(true, {}, buttonCommon, {
         extend: 'print',
-        text: '<?php echo escape_js(get_vocab('print')) ?>'
+        text: '<?php echo get_js_vocab('print') ?>'
       })
     );
   }

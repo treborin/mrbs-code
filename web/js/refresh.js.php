@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 // Implements Ajax refreshing of the calendar view.   Only necessary, obviously,
@@ -8,16 +9,51 @@ require "../defaultincludes.inc";
 
 http_headers(array("Content-type: application/x-javascript"),
              60*30);  // 30 minute expiry
-
-if ($use_strict)
-{
-  echo "'use strict';\n";
-}
 ?>
+
+'use strict';
 
 var refreshListenerAdded = false;
 
 var intervalId;
+
+<?php
+// If the table container is scrollable, then scroll so that the current time is visible.
+?>
+function scrollToCurrentSlot() {
+  var table = $('.dwm_main');
+  var timelineVertical = table.find('thead').data('timeline-vertical');
+  var container = table.parent();
+  var scrollTo, scrollable;
+
+  scrollable = (timelineVertical) ? container.isHScrollable() : container.isVScrollable();
+
+  if (scrollable)
+  {
+    var slots = table.find('thead').data('slots');
+    var nowSlotIndices = Timeline.search(slots);
+    if (nowSlotIndices.length > 1)
+    {
+      <?php // Show the row/column just before the current slot ?>
+      var index = Math.max(0, nowSlotIndices[0] - 1);
+    }
+    if (index > 0) <?php // No point in scrolling to where we already are ?>
+    {
+      if (timelineVertical)
+      {
+        var cols = table.find('thead th:not(.first_last)');
+        scrollTo = cols.eq(index).offset().left - cols.eq(0).offset().left;
+        container.scrollLeft(scrollTo);
+      }
+      else
+      {
+        var rows = table.find('tbody tr');
+        scrollTo = rows.eq(index).offset().top - rows.eq(0).offset().top;
+        container.scrollTop(scrollTo);
+      }
+    }
+  }
+}
 
 <?php
 // Make the columns in the calendar views of equal size.   We can't use an inline style,
@@ -32,12 +68,13 @@ var sizeColumns = function() {
 
 
 var refreshPage = function refreshPage() {
+    var table = $('table.dwm_main');
     <?php
     // Allow refreshing if we're on a metered connection and in kiosk
     // mode, because kiosk mode relies on regular refreshing.
     ?>
     if (!isHidden() &&
-        !$('table.dwm_main').hasClass('resizing') &&
+        !table.hasClass('resizing') &&
         (args.kiosk || !isMeteredConnection()) &&
         !refreshPage.disabled)
     {
@@ -67,7 +104,7 @@ var refreshPage = function refreshPage() {
       // class to the table we ensure that this can't happen, because if the user moves to a
       // different day the new HTML won't have the class.
       ?>
-      $('table.dwm_main').addClass('refreshable');
+      table.addClass('refreshable');
 
       if(args.site)
       {
@@ -173,11 +210,13 @@ var Timeline = {
   ?>
   getFirstNonZeroSlotSize: function() {
     var slotSize;
+    var table = $('#day_main');
+
     <?php
     if ($times_along_top)
     {
       ?>
-      $('#day_main').find('thead th').not('.first_last').each(function () {
+      table.find('thead th').not('.first_last').each(function () {
           slotSize = $(this).outerWidth();
           if (slotSize)
           {
@@ -189,7 +228,7 @@ var Timeline = {
     else
     {
       ?>
-      $('#day_main').find('tbody tr').each(function () {
+      table.find('tbody tr').each(function () {
           slotSize = $(this).outerHeight();
           if (slotSize)
           {
@@ -206,6 +245,7 @@ var Timeline = {
   // Searches for time within the slots array and returns the result as an array consisting of the
   // index of the time slot and, if there is one (ie if it's the week view), the index of the day.
   // If time isn't within any of the slots then returns an empty array.
+  // time defaults to the current time.
   ?>
   search: function(slots, time) {
     <?php
@@ -263,6 +303,11 @@ var Timeline = {
 
     var result = [];
 
+    if ((typeof time === 'undefined'))
+    {
+      time = Math.floor(Date.now() / 1000);
+    }
+
     <?php // Only look for an index if we know that the time is possibly within the slots somewhere ?>
     if ((typeof slots !== 'undefined') && within(slots, time))
     {
@@ -294,7 +339,7 @@ var Timeline = {
     var top, left, borderLeftWidth, borderRightWidth, width, height;
     var headers, headersFirstLast, headersNormal, headerFirstSize, headerLastSize;
 
-    nowSlotIndices = Timeline.search(slots, now);
+    nowSlotIndices = Timeline.search(slots);
 
     if (nowSlotIndices.length > 1)
     {
@@ -440,7 +485,7 @@ var Timeline = {
       {
         <?php // The delay is half the slot length in seconds divided by the slot width/height in pixels ?>
         delay = (slot[1] - slot[0])/(2 * slotSize);
-        delay = parseInt(delay * 1000, 10); <?php // Convert to milliseconds ?>
+        delay = Math.round(delay * 1000); <?php // Convert to milliseconds ?>
         delay = Math.max(delay, 1000);
       }
       <?php // If we still haven't got one, or else it's zero, then set a sensible default delay ?>
@@ -456,6 +501,7 @@ var Timeline = {
 
 $(document).on('page_ready', function() {
 
+  var table = $('table.dwm_main');
   Timeline.clear();
 
   <?php
@@ -464,7 +510,7 @@ $(document).on('page_ready', function() {
   // whole window.   For example if we've got the datepicker open we don't want that
   // to be reset.
   ?>
-  $('table.dwm_main').on('tableload', function() {
+  table.on('tableload', function() {
 
       var refreshRate;
 
@@ -537,7 +583,56 @@ $(document).on('page_ready', function() {
       var bottom = $('.dwm_main thead tr:first th:first').outerHeight();
       $('.dwm_main thead tr:nth-child(2) th').css('top', bottom + 'px');
 
+      <?php
+      // Highlight the column header cells in the table and foot.
+      // TODO: this only works when the mouse is moved; the highlighting is lost when the
+      // TODO: page is automatically refreshed.
+      ?>
+      $('table.all_rooms td').on('mouseenter mouseleave', function(event) {
+        $('table.all_rooms')
+          .find('thead, tfoot')
+          .find('th:nth-child(' + ($(this).index() + 1) + ')')
+          .toggleClass('highlight', (event.type === 'mouseenter'));
+      });
+
     }).trigger('tableload');
+
+  <?php
+  // If we've been given scroll positions in the URL query string, scroll to them so that we
+  // go back to the scroll position the user started with.  Otherwise, scroll so that the
+  // current timeslot is visible.
+  //
+  // Do this on page_ready, rather than tableload, so that the scrolling doesn't happen after
+  // every automatic refresh.  That would be a problem if the user has deliberately scrolled
+  // somewhere else after the automatic scroll.
+  //
+  // TODO: Make sure that the booking that has just been made is visible in the table and
+  // TODO: scroll as necessary if not.
+  ?>
+  const searchParams = new URLSearchParams(window.location.search);
+  const top = searchParams.get('top');
+  const left = searchParams.get('left');
+
+  if ((top == null) && (left === null))
+  {
+    const autoscroll = <?php echo $autoscroll ? 'true' : 'false'; ?>;
+    if (autoscroll)
+    {
+      scrollToCurrentSlot();
+    }
+  }
+  else
+  {
+    let tableContainer = table.parent();
+    if (top !== null)
+    {
+      tableContainer.scrollTop(top);
+    }
+    if (left !== null)
+    {
+      tableContainer.scrollLeft(left);
+    }
+  }
 
 });
 

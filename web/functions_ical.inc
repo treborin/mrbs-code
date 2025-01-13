@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\ICalendar\RFC5545;
@@ -245,57 +246,13 @@ function get_vtimezone(string $tz)
 
 
 // Gets a username given an ORGANIZER value.   Returns NULL if none found
-function get_create_by(string $organizer)
+function get_create_by(string $organizer) : ?string
 {
-  global $auth, $mail_settings;
-
   // Get the email address.   Stripping off the 'mailto' is a very simplistic
   // method.  It will work in the majority of cases, but this needs to be improved
   $email = preg_replace('/^mailto:/', '', $organizer);
 
-  // If we're using the 'db' auth type, then look the username up in the users table
-  if ($auth['type'] == 'db')
-  {
-    $sql = "SELECT name
-              FROM " . _tbl('users') . "
-             WHERE email=?";
-
-    $res = db()->query($sql, array($email));
-
-    if ($res->count() == 0)
-    {
-      return null;
-    }
-    else
-    {
-      if ($res->count() > 1)
-      {
-        // Could maybe do something better here
-        trigger_error("ORGANIZER email address not unique", E_USER_NOTICE);
-      }
-      $row = $res->next_row_keyed();
-      return $row['name'];
-    }
-  }
-  // If we're using LDAP we can get the username given the email address
-  else if($auth['type'] == 'ldap')
-  {
-    // We need a function that is the inverse of authLdapGetEmail()
-    trigger_error("Cannot yet get username when using LDAP", E_USER_WARNING);
-    return null;
-  }
-  // Otherwise we derive the username from the email address
-  else
-  {
-    // We just want the string up to the '@'
-    $name = preg_replace('/@.*$/', '', $email);
-    // And add on the suffix if there is one
-    if (isset($mail_settings['username_suffix']))
-    {
-      $name .= $mail_settings['username_suffix'];
-    }
-    return $name;
-  }
+  return auth()->getUsernameByEmail($email);
 }
 
 
@@ -490,7 +447,10 @@ function create_ical_event(string $method, array $data, ?array $addresses=null, 
     }
   }
   $results[] = "SUMMARY:" . RFC5545::escapeText($data['name']);
-  $results[] = "DESCRIPTION:" . RFC5545::escapeText($data['description']);
+  if (isset($data['description']))
+  {
+    $results[] = "DESCRIPTION:" . RFC5545::escapeText($data['description']);
+  }
   $results[] = "LOCATION:" . RFC5545::escapeText($data['area_name'] . $default_area_room_delimiter . $data['room_name']);
   $results[] = "SEQUENCE:" . $data['ical_sequence'];
   // If this is an individual member of a series then set the recurrence id
@@ -589,7 +549,9 @@ function create_ical_event(string $method, array $data, ?array $addresses=null, 
   // Type
   $results[] = "X-MRBS-TYPE:" . RFC5545::escapeText(get_type_vocab($data['type']));
   // Registration properties
-  $properties = array(
+  if (isset($data['allow_registration']))
+  {
+    $properties = array(
       'allow_registration',
       'registrant_limit',
       'registrant_limit_enabled',
@@ -598,19 +560,18 @@ function create_ical_event(string $method, array $data, ?array $addresses=null, 
       'registration_closes',
       'registration_closes_enabled'
     );
-  foreach ($properties as $property)
-  {
-    $results[] = "X-MRBS-" . strtoupper(str_replace('_', '-', $property)) . ":" . $data[$property];
-  }
-  // Registrants (but only for individual entries)
-  if (!$series)
-  {
-    $registrants = get_registrants($data['id'], false);
-    foreach ($registrants as $registrant) {
-      // We can't use the ATTENDEEE property because its value has to be a URI.
-      $results[] = "X-MRBS-REGISTRANT;X-MRBS-REGISTERED=" . $registrant['registered'] .
-        ';' . 'X-MRBS-CREATE-BY=' . RFC5545::escapeQuotedString($registrant['create_by']) .
-        ':' . RFC5545::escapeText($registrant['username']);
+    foreach ($properties as $property) {
+      $results[] = "X-MRBS-" . strtoupper(str_replace('_', '-', $property)) . ":" . $data[$property];
+    }
+    // Registrants (but only for individual entries)
+    if (!$series) {
+      $registrants = get_registrants($data['id'], false);
+      foreach ($registrants as $registrant) {
+        // We can't use the ATTENDEE property because its value has to be a URI.
+        $results[] = "X-MRBS-REGISTRANT;X-MRBS-REGISTERED=" . $registrant['registered'] .
+          ';' . 'X-MRBS-CREATE-BY=' . RFC5545::escapeQuotedString($registrant['create_by']) .
+          ':' . RFC5545::escapeText($registrant['username']);
+      }
     }
   }
 
@@ -701,6 +662,10 @@ function export_icalendar(DBStatement $res, bool $keep_private, int $export_end=
 
   for ($i=0; (false !== ($row = $res->next_row_keyed())); $i++)
   {
+    row_cast_columns($row, 'entry');
+    // Turn the last_updated column into an int (some MySQL drivers will return a string,
+    // and it won't have been caught by row_cast_columns as it's a derived result).
+    $row['last_updated'] = intval($row['last_updated']);
     unpack_status($row);
     // If this is an individual entry, then construct an event
     if (!isset($row['rep_type']) || ($row['rep_type'] == RepeatRule::NONE))

@@ -123,7 +123,24 @@ function create_details_body(array $data, bool $as_html=false, bool $keep_privat
       default:
         if (!in_array($key, $standard_fields['entry']))
         {
-          $data[$key] = $hide_this_field ? $private_text : $data[$key];
+          if ($hide_this_field)
+          {
+            $data[$key] = $private_text;
+          }
+          else
+          {
+            $columns = Columns::getInstance(_tbl('entry'));
+            $column = $columns->getColumnByName($key);
+            // Convert DATE types into a locale friendly form
+            if (isset($column) && ('date' == $column->getType()))
+            {
+              $date = DateTime::createFromFormat(DateTime::ISO8601_DATE, $data[$key]);
+              if ($date !== false)
+              {
+                $data[$key] = datetime_format($datetime_formats['date'],  $date->getTimestamp());
+              }
+            }
+          }
         }
         break;
     }
@@ -232,7 +249,7 @@ function create_details_body(array $data, bool $as_html=false, bool $keep_privat
         // End date
         if ($enable_periods)
         {
-          list( , $end_date) =  period_date_string($data['end_time'], $data['area_id'], -1);
+          list( , $end_date) =  period_date_string($data['end_time'], $data['area_id'], true);
         }
         else
         {

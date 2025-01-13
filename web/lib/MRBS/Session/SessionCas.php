@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS\Session;
 
 use MRBS\Form\Form;
@@ -15,6 +16,7 @@ class SessionCas extends SessionWithLogin
   public function __construct()
   {
     $this->checkTypeMatchesSession();
+    $this->samesite = self::SAMESITE_LAX;
     auth()->init();  // Initialise CAS
     parent::__construct();
   }
@@ -28,7 +30,10 @@ class SessionCas extends SessionWithLogin
 
   public function authGet(?string $target_url=null, ?string $returl=null, ?string $error=null, bool $raw=false) : void
   {
-    // Useless Method - CAS does it all
+    if (!phpCAS::isAuthenticated())
+    {
+      phpCAS::forceAuthentication();
+    }
   }
 
 
@@ -44,7 +49,7 @@ class SessionCas extends SessionWithLogin
 
     return array(
         'action' => $target_url,
-        'method' => 'post',
+        'method' => Form::METHOD_POST,
         'hidden_inputs' =>  array('target_url' => $target_url,
                                   'action'     => 'QueryName')
       );

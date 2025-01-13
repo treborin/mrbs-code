@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS\Session;
 
 use MRBS\SessionHandlerDb;
@@ -8,13 +9,25 @@ use SessionHandler;
 use function MRBS\db;
 use function MRBS\db_schema_version;
 use function MRBS\get_cookie_path;
+use function MRBS\is_https;
 
 abstract class Session
 {
+  protected const SAMESITE_NONE = 'None';
+  protected const SAMESITE_LAX = 'Lax';
+  protected const SAMESITE_STRICT = 'Strict';
+
+  protected $samesite = null;
 
   public function __construct()
   {
-    global $auth;
+    global $auth, $cookie_samesite_lax;
+
+    // Child classes can set $this->samesite
+    if (!isset($this->samesite))
+    {
+      $this->samesite = ($cookie_samesite_lax) ? self::SAMESITE_LAX : self::SAMESITE_STRICT;
+    }
 
     // Start up sessions
     // Default to the behaviour of previous versions of MRBS, use only
@@ -37,9 +50,19 @@ abstract class Session
       return;
     }
 
-    // Set some session settings, as a defence against session fixation.
+    // Session settings, for security
+    // ini_set() only accepts string values prior to PHP 8.1.0
+    ini_set('session.cookie_httponly', '1');
+    if (version_compare(PHP_VERSION, '7.3', '>='))
+    {
+      // Only introduced in PHP Version 7.3
+      ini_set('session.cookie_samesite', $this->samesite);
+    }
+    ini_set('session.cookie_secure', (is_https()) ? '1' : '0');
+
+    // More settings, as a defence against session fixation.
     ini_set('session.use_only_cookies', '1');
-    ini_set('session.use_strict_mode', '1');  // Only available since PHP 5.5.2, but does no harm before then
+    ini_set('session.use_strict_mode', '1');
     ini_set('session.use_trans_sid', '0');
 
     $cookie_path = get_cookie_path();
@@ -47,10 +70,15 @@ abstract class Session
     // We don't want the session garbage collector to delete the session before it has expired
     if ($lifetime !== 0)
     {
-      ini_set('session.gc_maxlifetime', max(ini_get('session.gc_maxlifetime'), $lifetime));
+      assert(version_compare(MRBS_MIN_PHP_VERSION, '8.1') < 0, 'The strval() in the line below is no longer required.');
+      ini_set('session.gc_maxlifetime', strval(max(ini_get('session.gc_maxlifetime'), $lifetime)));
     }
 
-    session_name($auth['session_php']['session_name']);  // call before session_set_cookie_params() - see PHP manual
+    if (isset($auth['session_php']['session_name']))
+    {
+      // call before session_set_cookie_params() - see PHP manual
+      session_name($auth['session_php']['session_name']);
+    }
     session_set_cookie_params($lifetime, $cookie_path);
 
     $current_db_schema_version = db_schema_version();

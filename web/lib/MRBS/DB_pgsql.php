@@ -1,5 +1,5 @@
 <?php
-
+declare(strict_types=1);
 namespace MRBS;
 
 use PDOException;
@@ -109,10 +109,10 @@ class DB_pgsql extends DB
 
   // Return the value of an autoincrement field from the last insert.
   // For PostgreSQL, this must be a SERIAL type field.
-  public function insert_id(string $table, string $field)
+  public function insert_id(string $table, string $field): int
   {
     $seq_name = $table . "_" . $field . "_seq";
-    return $this->dbh->lastInsertId($seq_name);
+    return (int)$this->dbh->lastInsertId($seq_name);
   }
 
 
@@ -121,6 +121,21 @@ class DB_pgsql extends DB
   private static function hash(string $name) : int
   {
     return crc32($name);
+  }
+
+
+  // Determines whether the driver returns native types (eg a PHP int
+  // for an SQL INT).
+  public function returnsNativeTypes() : bool
+  {
+    return true;
+  }
+
+
+  // Determines whether the database supports multiple locks
+  public function supportsMultipleLocks(): bool
+  {
+    return true;
   }
 
 
@@ -151,12 +166,16 @@ class DB_pgsql extends DB
   // Returns true if the lock is released successfully, otherwise false.
   public function mutex_unlock(string $name) : bool
   {
-    $result = $this->query1("SELECT pg_advisory_unlock(" . self::hash($name) . ")");
+    $sql = "SELECT pg_advisory_unlock(" . self::hash($name) . ")";
+    $res = $this->query($sql);
+    $row = $res->next_row();
 
-    if (!is_bool($result))
+    if ($row === false)
     {
-      $result = false;
+      throw new DBException("Unexpected pg_advisory_unlock() error");
     }
+
+    $result = $row[0];
 
     if ($result)
     {
@@ -173,7 +192,7 @@ class DB_pgsql extends DB
   // Release all mutual-exclusion locks.
   public function mutex_unlock_all() : void
   {
-    $this->query1("SELECT pg_advisory_unlock_all()");
+    $this->query("SELECT pg_advisory_unlock_all()");
   }
 
 
@@ -198,7 +217,14 @@ class DB_pgsql extends DB
   // Just returns a version number, eg "9.2.24"
   private function versionNumber() : string
   {
-    return $this->query1("SHOW SERVER_VERSION");
+    $result = $this->query_scalar_non_bool("SHOW SERVER_VERSION");
+
+    if ($result === false)
+    {
+      throw new Exception("Could not get PostgreSQL server version");
+    }
+
+    return $result;
   }
 
 
@@ -359,7 +385,7 @@ class DB_pgsql extends DB
   // Generate non-standard SQL for LIMIT clauses:
   public function syntax_limit(int $count, int $offset) : string
   {
-    return " LIMIT $count OFFSET $offset ";
+    return "LIMIT $count OFFSET $offset";
   }
 
 
@@ -367,8 +393,10 @@ class DB_pgsql extends DB
   public function syntax_timestamp_to_unix(string $fieldname) : string
   {
     // A PostgreSQL timestamp can be a float.  We need to round it
-    // to the nearest integer.
-    return " ROUND(DATE_PART('epoch', $fieldname)) ";
+    // to the nearest integer.  Note that ROUND still returns a float type
+    // even though the value is an integer, so we need to cast it as well.
+    // (But the casting may round as well?  If so the round is redundant.)
+    return "CAST(ROUND(DATE_PART('epoch', $fieldname)) AS integer)";
   }
 
 
@@ -384,7 +412,7 @@ class DB_pgsql extends DB
   {
     $params[] = $string;
 
-    return " " . $this->quote($fieldname) . "=?";
+    return $this->quote($fieldname) . "=?";
   }
 
 
@@ -400,7 +428,7 @@ class DB_pgsql extends DB
   {
     $params[] = quotemeta($string);
 
-    return " $fieldname ~* ? ";
+    return "$fieldname ~* ?";
   }
 
 

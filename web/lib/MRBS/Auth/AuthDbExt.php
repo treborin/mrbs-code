@@ -1,8 +1,10 @@
 <?php
+declare(strict_types = 1);
 namespace MRBS\Auth;
 
 use MRBS\DBFactory;
 use MRBS\User;
+use ValueError;
 
 class AuthDbExt extends Auth
 {
@@ -59,83 +61,54 @@ class AuthDbExt extends Auth
     #[\SensitiveParameter]
     ?string $pass)
   {
-    $retval = false;
-
     // syntax_casesensitive_equals() modifies our SQL params array for us.   We need an exact match -
     // MySQL allows trailing spaces when using an '=' comparison, eg 'john' = 'john '
 
     $sql_params = array();
 
     $query = "SELECT " . $this->connection()->quote($this->column_name_password) .
-             "FROM " . $this->connection()->quote($this->db_table) .
-             "WHERE " . $this->connection()->syntax_casesensitive_equals($this->column_name_username,
-                                                                        $user,
-                                                                        $sql_params);
+               "FROM " . $this->connection()->quote($this->db_table) .
+              "WHERE " . $this->connection()->syntax_casesensitive_equals($this->column_name_username,
+                                                                          $user,
+                                                                          $sql_params);
 
     $stmt = $this->connection()->query($query, $sql_params);
 
-    if ($stmt->count() == 1) // force a unique match
+    // Check whether (a) there's just one result and (b) that password matches
+    return (($stmt->count() === 1) && $this->password_check($pass, $stmt->next_row()[0])) ? $user : false;
+  }
+
+
+  // Checks that a password matches a hash
+  protected function password_check(string $password, string $hash) : bool
+  {
+    switch ($this->password_format)
     {
-      $row = $stmt->next_row();
-
-      switch ($this->password_format)
-      {
-        case 'md5':
-          if (md5($pass) == $row[0])
-          {
-            $retval = $user;
-          }
-          break;
-
-        case 'sha1':
-          if (sha1($pass) == $row[0])
-          {
-            $retval = $user;
-          }
-          break;
-
-        case 'sha256':
-          if (hash('sha256', $pass) == $row[0])
-          {
-            $retval = $user;
-          }
-          break;
-
-        case 'crypt':
-          $recrypt = crypt($pass,$row[0]);
-          if ($row[0] == $recrypt)
-          {
-            $retval = $user;
-          }
-          break;
-
-        case 'password_hash':
-          if (password_verify($pass, $row[0]))
-          {
-            // Should we call password_needs_rehash() ?
-            // Probably not as we may not have UPDATE rights on the external database.
-            $retval = $user;
-          }
-          break;
-
-        default:
-          // Otherwise assume plaintext
-          if ($pass == $row[0])
-          {
-            $retval = $user;
-          }
-          break;
-      }
+      case 'crypt':
+      case 'password_hash':
+        // Don't call password_needs_rehash() as (a) we may not have UPDATE rights on the external
+        // database and (b) whether the password needs to be updated will depend on the PHP version
+        // on the external system, not this one.
+        return (password_verify($password, $hash));
+        break;
+      case 'plaintext':
+        return hash_equals($hash, $password);
+        break;
+      default:
+        // Check we've got a valid hashing algorithm.  From PHP 8.0.0 hash() will do this.
+        if ((version_compare(PHP_VERSION, '8.0.0') < 0) &&
+            !in_array($this->password_format, hash_algos()))
+        {
+          throw new ValueError("'$this->password_format' is not a valid hashing algorithm");
+        }
+        return hash_equals($hash, hash($this->password_format, $password));
+        break;
     }
-
-    return $retval;
   }
 
 
   protected function getUserFresh(string $username) : ?User
   {
-    global $auth;
-
     $sql_params = array();
 
     // Only retrieve the columns we need (a) to minimise the query and (b) to avoid
@@ -268,7 +241,6 @@ class AuthDbExt extends Auth
       }
 
       // Establish a connection
-      $persist = false;
       $port = isset($auth['db_ext']['db_port']) ? (int) $auth['db_ext']['db_port'] : null;
 
       $connection = DBFactory::create(
@@ -277,7 +249,7 @@ class AuthDbExt extends Auth
           $auth['db_ext']['db_username'],
           $auth['db_ext']['db_password'],
           $auth['db_ext']['db_name'],
-          $persist,
+          false,
           $port
         );
     }

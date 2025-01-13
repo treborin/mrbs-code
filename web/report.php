@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use DateInterval;
@@ -494,7 +495,7 @@ function is_little_endian() : bool
 
 // Converts a string from the standard MRBS character set to the character set
 // to be used for CSV files
-function csv_conv(string $string)
+function csv_conv(string $string) : string
 {
   $in_charset = utf8_strtoupper(get_charset());
   $out_charset = utf8_strtoupper(get_csv_charset());
@@ -511,6 +512,11 @@ function csv_conv(string $string)
     }
 
     $result = iconv($in_charset, $out_charset, $string);
+    if ($result === false)
+    {
+      throw new Exception("iconv() failed converting from '$in_charset' to '$out_charset'");
+    }
+
     // iconv() will add in a BOM if the output encoding requires one, but as we are only
     // dealing with parts of a file we don't want any BOMs because we add them separately
     // at the beginning of the file.  So strip off anything that looks like a BOM.
@@ -533,8 +539,7 @@ function csv_conv(string $string)
   }
   else
   {
-    trigger_error("Cannot convert from $in_charset to $out_charset", E_USER_NOTICE);
-    $result = FALSE;
+    throw new Exception("Cannot convert from '$in_charset' to '$out_charset'");
   }
 
   return $result;
@@ -575,6 +580,21 @@ function type_wrap(string $string, string $data_type) : string
   {
     return $string;
   }
+}
+
+
+function clean_row(array $row) : array
+{
+  row_cast_columns($row, 'entry');
+  // These won't have been covered by row_cast_columns()
+  $row['area_id'] = (int) $row['area_id'];
+  $row['last_updated'] = (int) $row['last_updated'];
+  $row['approval_enabled'] = (bool) $row['approval_enabled'];
+  $row['confirmation_enabled'] = (bool) $row['confirmation_enabled'];
+  $row['enable_periods'] = (bool) $row['enable_periods'];
+  unpack_status($row);
+
+  return $row;
 }
 
 
@@ -938,10 +958,11 @@ function report_row(&$rows, $data)
         $d_string = $d['duration'] . ' ' . $d['dur_units'];
         $d_string = escape($d_string);
       case 'start_time':
-        $mod_time = ($field == 'start_time') ? 0 : -1;
         if ($data['enable_periods'])
         {
-          list( , $date) =  period_date_string($value, $data['area_id'], $mod_time);
+          // If we've fallen through from 'end_time' we need to set previous_period to TRUE
+          // so that we get the name of the previous period, not this one.
+          list( , $date) =  period_date_string($value, $data['area_id'], ($field == 'end_time'));
         }
         else
         {
@@ -1019,7 +1040,7 @@ function report_row(&$rows, $data)
         }
         break;
     }
-    $value = escape($value ?? '');
+    $value = escape(strval($value ?? ''));
 
     // For HTML output we take special action for some fields
     if ($output_format == OUTPUT_HTML)
@@ -1044,26 +1065,26 @@ function report_row(&$rows, $data)
           break;
         case 'name':
           // Add a link to the entry and also a data-id value for the Bulk Delete JavaScript
-          $href = multisite('view_entry.php?id=' . urlencode($data['id']));
+          $href = multisite('view_entry.php?id=' . intval($data['id']));  // Cast to int as a precaution
           // Put an invisible <span> at the beginning for sorting.
           // TODO This should really be done by putting a data-order attribute in the <td> element,
           // TODO but we can't do that with Ajax loading.  The solution is to switch to use DataTables'
           // TODO orthogonal data.
           $value = "<span>$value</span>" .
                    '<a href="' . htmlspecialchars($href) . '"' .
-                   ' data-id="' . htmlspecialchars($data['id']) . '"' .
+                   ' data-id="' . intval($data['id']) . '"' .  // Cast to int as a precaution
                    $value . '">' . $value . '</a>';  // $value already escaped
           break;
         case 'end_time':
           // Process the duration and then fall through to the end_time
           // Include the duration in a seconds as a title in an empty span so
           // that the column can be sorted and filtered properly
-          $d_string = '<span title="' . htmlspecialchars($duration_seconds) . '"></span>' . $d_string;
+          $d_string = '<span title="' . intval($duration_seconds) . '"></span>' . $d_string;  // Cast to int as a precaution
         case 'start_time':
         case 'last_updated':
           // Include the numeric time as a title in an empty span so
           // that the column can be sorted and filtered properly
-          $value = '<span title="' . htmlspecialchars($data[$field]) . '"></span>' . $value;
+          $value = '<span title="' . intval($data[$field]) . '"></span>' . $value;
           break;
         case 'area_name':
           // TODO Use orthogonal data instead of a span
@@ -1139,8 +1160,8 @@ function increment_count(&$array, $index1, $index2, $increment)
 // Collect summary statistics on one entry.
 // This also builds hash tables of all unique names and rooms. When sorted,
 // these will become the column and row headers of the summary table.
-function accumulate($row, &$count, &$hours, $report_start, $report_end,
-                    &$room_hash, &$name_hash)
+function accumulate_summary($row, &$count, &$hours, $report_start, $report_end,
+                            &$room_hash, &$name_hash)
 {
   global $output_format, $periods;
 
@@ -1171,9 +1192,11 @@ function accumulate($row, &$count, &$hours, $report_start, $report_end,
     $endDate->setTimestamp($report_end)->modify('12:00');
     $endDate->sub(new DateInterval('P1D'));  // Go back one day because the $report_end is at 00:00 the day after
     $endDate->add(new DateInterval('PT' . $periods_per_day . 'M'));
-
-    $increment = get_period_interval(max($row['start_time'], $startDate->getTimestamp()),
-                                     min($row['end_time'], $endDate->getTimestamp()));
+    $increment = get_period_interval(
+      max($row['start_time'], $startDate->getTimestamp()),
+      min($row['end_time'], $endDate->getTimestamp()),
+      $row['area_id']
+    );
     $room_hash[$room] = MODE_PERIODS;
   }
   else
@@ -1381,7 +1404,7 @@ function get_match_condition(string $full_column_name, ?string $match, array &$s
   if ($table != 'entry')
   {
     // syntax_caseless_contains() modifies the SQL params array too
-    $sql .= " AND" . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
+    $sql .= " AND " . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
     return $sql;
   }
 
@@ -1437,7 +1460,7 @@ function get_match_condition(string $full_column_name, ?string $match, array &$s
   else
   {
     // syntax_caseless_contains() modifies the SQL params array too
-    $sql .= " AND" . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
+    $sql .= " AND " . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
   }
 
   return $sql;
@@ -1456,8 +1479,8 @@ if ($cli_mode)
 
 $default_from_time = mktime(0, 0, 0, $month, $day, $year);
 $default_to_time = mktime(0, 0, 0, $month, $day + $default_report_days, $year);
-$default_from_date = date('Y-m-d', $default_from_time);
-$default_to_date = date('Y-m-d', $default_to_time);
+$default_from_date = date(DateTime::ISO8601_DATE, $default_from_time);
+$default_to_date = date(DateTime::ISO8601_DATE, $default_to_time);
 
 // Get non-standard form variables
 $from_date = get_form_var('from_date', 'string', $default_from_date);
@@ -1507,9 +1530,24 @@ else
     Form::checkToken(true);
   }
 
-  // Check the user is authorised for this page
-  checkAuthorised(this_page());
-  $mrbs_user = session()->getCurrentUser();
+  // Check the user is authorised for this page.
+  if ($report_unauthenticated_get_enabled && is_get_request() && ($phase == 2))
+  {
+    if ($report_keys_enabled)
+    {
+      $key = get_form_var('key', 'string');
+      if (!in_array($key, $report_keys))
+      {
+        http_response_code(403);
+        exit;
+      }
+    }
+  }
+  else
+  {
+    checkAuthorised(this_page());
+    $mrbs_user = session()->getCurrentUser();
+  }
 }
 
 // Set up for Ajax.   We need to know whether we're capable of dealing with Ajax
@@ -1526,8 +1564,8 @@ $private_somewhere = some_area('private_enabled') || some_area('private_mandator
 $approval_somewhere = some_area('approval_enabled');
 $confirmation_somewhere = some_area('confirmation_enabled');
 $registration_somewhere = registration_somewhere();
-$times_somewhere = (db()->query1("SELECT COUNT(*) FROM " . _tbl('area') . " WHERE enable_periods=0") > 0);
-$periods_somewhere = (db()->query1("SELECT COUNT(*) FROM " . _tbl('area') . " WHERE enable_periods!=0") > 0);
+$times_somewhere = times_somewhere();
+$periods_somewhere = periods_somewhere();
 
 
 // Build the report search field order
@@ -1611,17 +1649,21 @@ $field_order_list[] = 'last_updated';
 if ($phase == 2)
 {
   // Start and end times are also used to clip the times for summary info.
-  if (false === ($report_start_date = DateTime::createFromFormat('Y-m-d H:i:s', "$from_date 00:00:00")))
+  // createFromFormat() gives the current time.  We want the report to
+  // start at the beginning of the start day and end of the day, so set the
+  // times accordingly.
+  if (false === ($report_start = DateTime::createFromFormat(DateTime::ISO8601_DATE, $from_date)))
   {
     throw new Exception("Invalid from_date '$from_date'");
   }
-  $report_start = $report_start_date->getTimestamp();
+  $report_start = $report_start->setTime(0, 0)->getTimestamp();
 
-  if (false === ($report_end_date = DateTime::createFromFormat('Y-m-d H:i:s', "$to_date 00:00:00")))
+  if (false === ($report_end = DateTime::createFromFormat(DateTime::ISO8601_DATE, $to_date)))
   {
     throw new Exception("Invalid to_date '$to_date'");
   }
-  $report_end = $report_end_date->modify('+1 day')->getTimestamp();
+  $report_end = $report_end->setTime(24, 0)->getTimestamp();
+
 
   // Construct the SQL query
   $sql_params = array();
@@ -1753,6 +1795,16 @@ if ($phase == 2)
     }
   }
 
+  // If we're allowing unauthenticated requests and this is one then check that the
+  // room is in the list of open rooms or the area is in the list of open areas.
+  if ($report_unauthenticated_get_enabled && is_get_request())
+  {
+    $sql .= " AND (";
+    $sql .= db()->syntax_in_list('A.id', $report_open_areas, $sql_params) . " OR ";
+    $sql .= db()->syntax_in_list('R.id', $report_open_rooms, $sql_params);
+    $sql .= ")";
+  }
+
   if ($output_format == OUTPUT_ICAL)
   {
     // If we're producing an iCalendar then we'll want the entries ordered by
@@ -1837,7 +1889,7 @@ if ($output_form)
 {
   echo "<div class=\"screenonly\">\n";
 
-  $form = new Form();
+  $form = new Form(Form::METHOD_POST);
 
   // Search variables
   $search_var_keys = array('from_date', 'to_date',
@@ -1862,8 +1914,7 @@ if ($output_form)
 
   $attributes = array('id'     => 'report_form',
                       'class'  => 'standard',
-                      'action' => multisite(this_page()),
-                      'method' => 'post');
+                      'action' => multisite(this_page()));
 
   $form->setAttributes($attributes)
        ->addHiddenInput('phase', '2');
@@ -1927,7 +1978,7 @@ if ($phase == 2)
       $body_rows = array();
       while (false !== ($row = $res->next_row_keyed()))
       {
-        unpack_status($row);
+        $row = clean_row($row);
         report_row($body_rows, $row);
       }
       output_body_rows($body_rows, $output_format);
@@ -1941,10 +1992,10 @@ if ($phase == 2)
       {
         while (false !== ($row = $res->next_row_keyed()))
         {
-          unpack_status($row);
-          accumulate($row, $count, $hours,
-                     $report_start, $report_end,
-                     $room_hash, $name_hash);
+          $row = clean_row($row);
+          accumulate_summary($row, $count, $hours,
+                             $report_start, $report_end,
+                             $room_hash, $name_hash);
         }
         do_summary($count, $hours, $room_hash, $name_hash);
       }

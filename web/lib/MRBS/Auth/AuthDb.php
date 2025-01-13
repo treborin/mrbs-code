@@ -1,4 +1,5 @@
 <?php
+declare(strict_types = 1);
 namespace MRBS\Auth;
 
 use MRBS\MailQueue;
@@ -8,7 +9,6 @@ use function MRBS\_tbl;
 use function MRBS\auth;
 use function MRBS\db;
 use function MRBS\format_compound_name;
-use function MRBS\generate_global_uid;
 use function MRBS\generate_token;
 use function MRBS\get_mail_charset;
 use function MRBS\get_vocab;
@@ -90,7 +90,7 @@ class AuthDb extends Auth
     // We use syntax_casesensitive_equals() rather than just '=' because '=' in MySQL
     // permits trailing spacings, eg 'john' = 'john '.   We could use LIKE, but that then
     // permits wildcards, so we could use a combination of LIKE and '=' but that's a bit
-    // messy.  WE could use STRCMP, but that's MySQL only.
+    // messy.  We could use STRCMP, but that's MySQL only.
 
     // Usernames are unique in the users table, so we only look for one.
     $sql = "SELECT password_hash, name
@@ -198,13 +198,23 @@ class AuthDb extends Auth
   // Return an array of all users
   public function getUsers() : array
   {
-    $sql = "SELECT *
+    // Add in an extra column, last_updated, which is the SQL timestamp converted to a UNIX
+    // timestamp.  We do the conversion in the SQL query so that it is converted using the
+    // same timezone that it was stored with.
+    $sql = "SELECT *, ". db()->syntax_timestamp_to_unix("timestamp") . " AS last_updated
               FROM " . _tbl('users') . "
              ORDER BY name";
 
     $res = db()->query($sql);
 
     return $res->all_rows_keyed();
+  }
+
+
+  // Checks whether the authentication type allows the creation of new users.
+  public function canCreateUsers() : bool
+  {
+    return true;
   }
 
 
@@ -564,9 +574,8 @@ class AuthDb extends Auth
     MailQueue::add(
         $addresses,
         $subject,
-        array('content' => strip_tags($body)),
-        array('content' => $body,
-          'cid'     => generate_global_uid("html")),
+        strip_tags($body),
+        $body,
         null,
         get_mail_charset()
       );
@@ -655,6 +664,32 @@ class AuthDb extends Auth
     }
 
     return $user;
+  }
+
+
+  // Returns a username given an email address.  Note that if two or more
+  // users share the same email address then the first one found will be
+  // returned.  If no user is found then NULL is returned.
+  public function getUsernameByEmail(string $email) : ?string
+  {
+    $sql = "SELECT name
+              FROM " . _tbl('users') . "
+             WHERE email=?";
+
+    $res = db()->query($sql, array($email));
+
+    if ($res->count() == 0)
+    {
+      return null;
+    }
+
+    if ($res->count() > 1)
+    {
+      // Could maybe do something better here
+      trigger_error("Email address not unique", E_USER_NOTICE);
+    }
+    $row = $res->next_row_keyed();
+    return $row['name'];
   }
 
 

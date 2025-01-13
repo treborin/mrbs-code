@@ -1,6 +1,8 @@
 <?php
+declare(strict_types=1);
 namespace MRBS\Session;
 
+use MRBS\Form\Form;
 use MRBS\User;
 use SimpleSAML\Auth\Simple;
 use function MRBS\auth;
@@ -64,6 +66,7 @@ class SessionSaml extends SessionWithLogin
     $authSource = $auth['saml']['authsource'] ?? 'default-sp';
 
     $this->ssp = new \SimpleSAML\Auth\Simple($authSource);
+    $this->samesite = self::SAMESITE_LAX;
     parent::__construct();
   }
 
@@ -122,7 +125,7 @@ class SessionSaml extends SessionWithLogin
 
     $result = array(
         'action' => $baseURL,
-        'method' => 'get'
+        'method' => Form::METHOD_GET
       );
 
     if (!empty($params))
@@ -143,7 +146,7 @@ class SessionSaml extends SessionWithLogin
 
     $result = array(
         'action' => $baseURL,
-        'method' => 'get'
+        'method' => Form::METHOD_GET
       );
 
     if (!empty($params))

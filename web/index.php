@@ -1,9 +1,12 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Form\ElementInputSubmit;
 use MRBS\Form\ElementSelect;
 use MRBS\Form\Form;
+use MRBS\Intl\IntlDateFormatter;
+use OpenPsa\Ranger\Ranger;
 
 require "defaultincludes.inc";
 require_once "functions_table.inc";
@@ -53,7 +56,6 @@ function make_area_select_html(string $view, int $year, int $month, int $day, in
     $form = new Form();
 
     $form->setAttributes(array('class'  => 'areaChangeForm',
-                               'method' => 'get',
                                'action' => multisite(this_page())));
 
     $form->addHiddenInputs(array('view'      => $view,
@@ -118,7 +120,6 @@ function make_room_select_html (string $view, int $view_all, int $year, int $mon
     $form = new Form();
 
     $form->setAttributes(array('class'  => 'roomChangeForm',
-                               'method' => 'get',
                                'action' => multisite(this_page())));
 
     $form->addHiddenInputs(array('view'      => $view,
@@ -155,7 +156,7 @@ function make_room_select_html (string $view, int $view_all, int $year, int $mon
 
 
 // Gets the link to the next/previous day/week/month
-function get_adjacent_link(string $view, int $view_all, int $year, int $month, int $day, int $area, int $room, bool $next=false) : string
+function get_adjacent_link(string $view, int $view_all, int $year, int $month, int $day, int $area, int $room, int $increment) : string
 {
   $date = new DateTime();
   $date->setDate($year, $month, $day);
@@ -163,21 +164,22 @@ function get_adjacent_link(string $view, int $view_all, int $year, int $month, i
   switch ($view)
   {
     case 'day':
-      $modifier = ($next) ? '+1 day' : '-1 day';
+      $modifier = "$increment day";
+      $date->modify($modifier);
       // find the next non-hidden day
       $i = 0;
-      do {
+      while ($date->isHiddenDay() && ($i < DAYS_PER_WEEK)) // break the loop if all days are hidden
+      {
         $i++;
         $date->modify($modifier);
-      } while ($date->isHiddenDay() && ($i < DAYS_PER_WEEK)); // break the loop if all days are hidden
+      }
       break;
     case 'week':
-      $modifier = ($next) ? '+1 week' : '-1 week';
+      $modifier = "$increment week";
       $date->modify($modifier);
       break;
     case 'month':
-      $n = ($next) ? 1 : -1;
-      $date->modifyMonthsNoOverflow($n);
+      $date->modifyMonthsNoOverflow($increment);
       break;
     default:
       throw new \Exception("Unknown view '$view'");
@@ -190,7 +192,7 @@ function get_adjacent_link(string $view, int $view_all, int $year, int $month, i
                 'area'      => $area,
                 'room'      => $room);
 
-  return 'index.php?' . http_build_query($vars, '', '&');
+  return multisite('index.php?' . http_build_query($vars, '', '&'));
 }
 
 
@@ -205,7 +207,7 @@ function get_today_link(string $view, int $view_all, int $area, int $room) : str
                 'area'      => $area,
                 'room'      => $room);
 
-  return 'index.php?' . http_build_query($vars, '', '&');
+  return multisite('index.php?' . http_build_query($vars, '', '&'));
 }
 
 
@@ -272,6 +274,10 @@ function get_arrow_nav(string $view, int $view_all, int $year, int $month, int $
       $title_prev = get_vocab('daybefore');
       $title_this = get_vocab('gototoday');
       $title_next = get_vocab('dayafter');
+      $title_prev_week = get_vocab('weekbefore');
+      $title_next_week = get_vocab('weekafter');
+      $link_prev_week = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, -7);
+      $link_next_week = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, +7);
       break;
     case 'week':
       $title_prev = get_vocab('weekbefore');
@@ -291,18 +297,24 @@ function get_arrow_nav(string $view, int $view_all, int $year, int $month, int $
   $title_prev = htmlspecialchars($title_prev);
   $title_next = htmlspecialchars($title_next);
 
-  $link_prev = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, false);
+  $link_prev = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, -1);
   $link_today = get_today_link($view, $view_all, $area, $room);
-  $link_next = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, true);
+  $link_next = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, 1);
 
-  $link_prev = multisite($link_prev);
-  $link_today = multisite($link_today);
-  $link_next = multisite($link_next);
-
+  // For the day view we also offer buttons to go back/forward by one week.
+  // The links without any text have their content filled by CSS.
   $html .= "<nav class=\"arrow\">\n";
-  $html .= "<a class=\"prev\" title=\"$title_prev\" aria-label=\"$title_prev\" href=\"" . htmlspecialchars($link_prev) . "\"></a>";  // Content will be filled in by CSS
+  if ($view == 'day')
+  {
+    $html .= "<a class=\"prev week symbol prefetch\" title=\"$title_prev_week\" aria-label=\"$title_prev_week\" href=\"" . htmlspecialchars($link_prev_week) . "\"></a>";
+  }
+  $html .= "<a class=\"prev symbol prefetch\" title=\"$title_prev\" aria-label=\"$title_prev\" href=\"" . htmlspecialchars($link_prev) . "\"></a>";
   $html .= "<a title= \"$title_this\" aria-label=\"$title_this\" href=\"" . htmlspecialchars($link_today) . "\">" . get_vocab('today') . "</a>";
-  $html .= "<a class=\"next\" title=\"$title_next\" aria-label=\"$title_next\" href=\"" . htmlspecialchars($link_next) . "\"></a>";  // Content will be filled in by CSS
+  $html .= "<a class=\"next symbol prefetch\" title=\"$title_next\" aria-label=\"$title_next\" href=\"" . htmlspecialchars($link_next) . "\"></a>";
+  if ($view == 'day')
+  {
+    $html .= "<a class=\"next week symbol prefetch\" title=\"$title_next_week\" aria-label=\"$title_next_week\" href=\"" . htmlspecialchars($link_next_week) . "\"></a>";
+  }
   $html .= "</nav>";
 
   return $html;
@@ -329,7 +341,7 @@ function get_calendar_nav(string $view, int $view_all, int $year, int $month, in
 
 function get_date_heading(string $view, int $year, int $month, int $day) : string
 {
-  global $datetime_formats, $display_timezone,
+  global $datetime_formats, $display_timezone, $timezone,
          $weekstarts, $view_week_number;
 
   $html = '';
@@ -344,9 +356,9 @@ function get_date_heading(string $view, int $year, int $month, int $day) : strin
       break;
 
     case 'week':
-      // Display the week number if required, provided the week starts on Monday,
-      // otherwise it's spanning two ISO weeks and doesn't make sense.
-      if ($view_week_number && ($weekstarts == 1))
+      // Display the week number if required, provided the MRBS week starts on the first day
+      // of the week, otherwise it's spanning two weeks and doesn't make sense.
+      if ($view_week_number && ($weekstarts == DateTime::firstDayOfWeek($timezone, get_mrbs_locale())))
       {
         $html .= '<span class="week_number">' .
                  get_vocab('week_number', datetime_format($datetime_formats['week_number'], $time)) .
@@ -355,26 +367,16 @@ function get_date_heading(string $view, int $year, int $month, int $day) : strin
       // Then display the actual dates
       $day_of_week = date('w', $time);
       $our_day_of_week = ($day_of_week + DAYS_PER_WEEK - $weekstarts) % DAYS_PER_WEEK;
-      $start_of_week = mktime(12, 0, 0, $month, $day - $our_day_of_week, $year);
-      $end_of_week = mktime(12, 0, 0, $month, $day + 6 - $our_day_of_week, $year);
-      // We have to cater for three possible cases.  For example
-      //    Years differ:                   26 Dec 2016 - 1 Jan 2017
-      //    Years same, but months differ:  30 Jan - 5 Feb 2017
-      //    Years and months the same:      6 - 12 Feb 2017
-      if (date('Y', $start_of_week) != date('Y', $end_of_week))
-      {
-        $start_format = $datetime_formats['view_week_year'];
-      }
-      elseif (date('m', $start_of_week) != date('m', $end_of_week))
-      {
-        $start_format = $datetime_formats['view_week_month'];
-      }
-      else
-      {
-        $start_format = $datetime_formats['view_week_date'];
-      }
-      $html .= datetime_format($start_format, $start_of_week) . ' - ' .
-               datetime_format($datetime_formats['view_week_year'], $end_of_week);
+      $ranger = new Ranger(get_mrbs_locale());
+      $ranger
+        ->setRangeSeparator(get_vocab('range_separator'))
+        ->setDateType($datetime_formats['view_week']['date_type'] ?? IntlDateFormatter::LONG)
+        ->setTimeType($datetime_formats['view_week']['time_type'] ?? IntlDateFormatter::NONE);
+      $range = $ranger->format(
+        format_iso_date($year, $month, $day - $our_day_of_week),
+        format_iso_date($year, $month, $day +6 - $our_day_of_week)
+      );
+      $html .= $range;
       break;
 
     case 'month':
@@ -399,6 +401,19 @@ function get_date_heading(string $view, int $year, int $month, int $day) : strin
 }
 
 
+function message_html() : string
+{
+  $message = Message::getInstance();
+  $message->load();
+
+  if ($message->hasSomethingToDisplay())
+  {
+    return '<p class="message_top">' . $message->getEscapedText() . "</p>\n";
+  }
+
+  return '';
+}
+
 // Get non-standard form variables
 $refresh = get_form_var('refresh', 'int');
 $timetohighlight = get_form_var('timetohighlight', 'int');
@@ -419,9 +434,10 @@ if (isset($kiosk))
 
 $is_ajax = is_ajax();
 
-// If we're using the 'db' authentication type, check to see if MRBS has just been installed
+// If we're using an authentication type that supports the creation of users, eg 'db'
+// or an extension of that type, then check to see if MRBS has just been installed
 // and, if so, redirect to the edit_users page so that they can set up users.
-if (($auth['type'] == 'db') && (count(auth()->getUsers()) == 0))
+if (auth()->canCreateUsers() && (count(auth()->getUsers()) == 0))
 {
   location_header('edit_users.php');
 }
@@ -480,6 +496,8 @@ echo "</div>\n";
 echo "<div class=\"view_container js_hidden\">\n";
 echo "<div class=\"date_heading\">$date_heading</div>";
 echo get_calendar_nav($view, $view_all, $year, $month, $day, $area, $room);
+
+echo message_html();
 
 $classes = array('dwm_main');
 if ($times_along_top)
