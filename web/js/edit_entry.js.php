@@ -1,16 +1,14 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require "../defaultincludes.inc";
 
 http_headers(array("Content-type: application/x-javascript"),
              60*30);  // 30 minute expiry
-
-if ($use_strict)
-{
-  echo "'use strict';\n";
-}
 ?>
+
+'use strict';
 
 var isBookAdmin;
 
@@ -98,16 +96,16 @@ var changeRepIntervalUnits = function changeRepIntervalUnits() {
     switch (repType)
     {
       case <?php echo RepeatRule::DAILY ?>:
-        text = (repInterval === 1) ? '<?php echo get_vocab('day') ?>' : '<?php echo get_vocab('days') ?>';
+        text = (repInterval === 1) ? '<?php echo get_js_vocab('day') ?>' : '<?php echo get_js_vocab('days') ?>';
         break;
       case <?php echo RepeatRule::WEEKLY ?>:
-        text = (repInterval === 1) ? '<?php echo get_vocab('week') ?>' : '<?php echo get_vocab('weeks') ?>';
+        text = (repInterval === 1) ? '<?php echo get_js_vocab('week') ?>' : '<?php echo get_js_vocab('weeks') ?>';
         break;
       case <?php echo RepeatRule::MONTHLY ?>:
-        text = (repInterval === 1) ? '<?php echo get_vocab('month') ?>' : '<?php echo get_vocab('months') ?>';
+        text = (repInterval === 1) ? '<?php echo get_js_vocab('month') ?>' : '<?php echo get_js_vocab('months') ?>';
         break;
       case <?php echo RepeatRule::YEARLY ?>:
-        text = (repInterval === 1) ? '<?php echo get_vocab('year_lc') ?>' : '<?php echo get_vocab('years') ?>';
+        text = (repInterval === 1) ? '<?php echo get_js_vocab('year_lc') ?>' : '<?php echo get_js_vocab('years') ?>';
         break;
       default:
         text = units.text();
@@ -321,7 +319,7 @@ function validationMessages()
       {
         validationMessages.vocab[key] = label.text();
         validationMessages.vocab[key] = '"' + validationMessages.vocab[key] + '" ';
-        validationMessages.vocab[key] += '<?php echo escape_js(get_vocab("is_mandatory_field")) ?>';
+        validationMessages.vocab[key] += '<?php echo get_js_vocab("is_mandatory_field") ?>';
 
         field = document.getElementById(key);
         if (field.setCustomValidity && field.willValidate)
@@ -478,7 +476,7 @@ function validate(form)
   var dateDiff = getDateDifference();
   if (dateDiff < 0)
   {
-    window.alert("<?php echo escape_js(get_vocab('start_after_end_long'))?>");
+    window.alert("<?php echo get_js_vocab('start_after_end_long')?>");
     return false;
   }
 
@@ -493,7 +491,7 @@ function validate(form)
     if ((!("min" in testInput) || !(("step" in testInput))) &&
         (form.find('#rep_interval').val() < 1))
     {
-      window.alert("<?php echo escape_js(get_vocab('invalid_rep_interval')) ?>");
+      window.alert("<?php echo get_js_vocab('invalid_rep_interval') ?>");
       return false;
     }
     <?php
@@ -502,7 +500,7 @@ function validate(form)
     ?>
     if ($('input[name="rep_end_date"]').val() === $('input[name="end_date"]').val())
     {
-      if (!window.confirm("<?php echo escape_js(get_vocab('confirm_rep_end_date')) ?>"))
+      if (!window.confirm("<?php echo get_js_vocab('confirm_rep_end_date') ?>"))
       {
         return false;
       }
@@ -742,14 +740,14 @@ function checkConflicts(optional)
 // minutes, hours and days
 ?>
 var vocab = {};
-vocab.periods = {singular: '<?php echo escape_js(get_vocab("period_lc")) ?>',
-                 plural:   '<?php echo escape_js(get_vocab("periods")) ?>'};
-vocab.minutes = {singular: '<?php echo escape_js(get_vocab("minute_lc")) ?>',
-                 plural:   '<?php echo escape_js(get_vocab("minutes")) ?>'};
-vocab.hours   = {singular: '<?php echo escape_js(get_vocab("hour_lc")) ?>',
-                 plural:   '<?php echo escape_js(get_vocab("hours")) ?>'};
-vocab.days    = {singular: '<?php echo escape_js(get_vocab("day")) ?>',
-                 plural:   '<?php echo escape_js(get_vocab("days")) ?>'};
+vocab.periods = {singular: '<?php echo get_js_vocab("period_lc") ?>',
+                 plural:   '<?php echo get_js_vocab("periods") ?>'};
+vocab.minutes = {singular: '<?php echo get_js_vocab("minute_lc") ?>',
+                 plural:   '<?php echo get_js_vocab("minutes") ?>'};
+vocab.hours   = {singular: '<?php echo get_js_vocab("hour_lc") ?>',
+                 plural:   '<?php echo get_js_vocab("hours") ?>'};
+vocab.days    = {singular: '<?php echo get_js_vocab("day") ?>',
+                 plural:   '<?php echo get_js_vocab("days") ?>'};
 
 
 <?php
@@ -968,7 +966,7 @@ function adjustSlotSelectors()
       oldEndValue = parseInt(endSelect.data('previous'), 10);
 
   var nbsp = '\u00A0',
-      startValue, endValue, lastValue, optionClone;
+      startValue, endValue, firstValue, lastValue, optionClone;
 
   if (startSelect.length === 0)
   {
@@ -1063,7 +1061,7 @@ function adjustSlotSelectors()
     startValue = parseInt(startSelect.val(), 10);
     endValue = parseInt(endSelect.val(), 10);
     <?php
-    // If the start value has changed then we adjust the endvalue
+    // If the start value has changed then we adjust the end value
     // to keep the duration the same.  (If the end value has changed
     // then the duration will be changed when we recalculate durations below)
     ?>
@@ -1160,7 +1158,7 @@ function adjustSlotSelectors()
             if (i === 0)
             {
               endSelect.append($(this).val(thisValue).text(nbsp));
-              var errorMessage = '<?php echo escape_js(get_vocab("max_booking_duration")) ?>' + nbsp;
+              var errorMessage = '<?php echo get_js_vocab("max_booking_duration") ?>' + nbsp;
               if (enablePeriods)
               {
                 errorMessage += maxDurationPeriods + nbsp;
@@ -1187,7 +1185,7 @@ function adjustSlotSelectors()
         optionClone = $(this).clone();
         if (dateDifference < 0)
         {
-          optionClone.text('<?php echo escape_js(get_vocab("start_after_end"))?>');
+          optionClone.text('<?php echo get_js_vocab("start_after_end")?>');
         }
         else
         {
@@ -1199,8 +1197,26 @@ function adjustSlotSelectors()
       }
     });
 
+  firstValue = parseInt(endSelect.find('option').first().val(), 10);
   lastValue = parseInt(endSelect.find('option').last().val(), 10);
-  endValue = isNaN(endValue) ? lastValue : Math.min(endValue, lastValue);
+  if (isNaN(endValue)) <?php // Is this possible? ?>
+  {
+    endValue = lastValue;
+  }
+  else
+  {
+    <?php
+    // We constrain the end value to stay on the same day, but it might be
+    // better to move the end date selector back one day if the new end value
+    // would be before the beginning of the day, and similarly forward one day
+    // if it would be after the end of the day.  This is what some other calendar
+    // systems, eg Outlook, do, but it gets a little more complicated when the
+    // booking day is less than 24 hours, as it is by default in MRBS.
+    ?>
+    endValue = Math.max(endValue, firstValue);
+    endValue = Math.min(endValue, lastValue);
+  }
+
   endSelect.val(endValue);
   endSelect.data('current', endValue);
 
@@ -1341,6 +1357,7 @@ $(document).on('page_ready', function() {
 
   var form = $('#main'),
       areaSelect = $('#area'),
+      startAndEndDates = $('#start_date, #end_date'),
       startSelect,
       endSelect,
       allDay;
@@ -1516,8 +1533,8 @@ $(document).on('page_ready', function() {
   var tabsHTML =
 '<div id="check_tabs">' +
 '<ul id="details_tabs">' +
-'<li><a href="#schedule_details"><?php echo get_vocab('schedule') ?></a></li>' +
-'<li><a href="#policy_details"><?php echo get_vocab('policy') ?></a></li>' +
+'<li><a href="#schedule_details"><?php echo get_js_vocab('schedule') ?></a></li>' +
+'<li><a href="#policy_details"><?php echo get_js_vocab('policy') ?></a></li>' +
 '<li id="ui-tab-dialog-close"></li>' +
 '</ul>' +
 '<div id="schedule_details"></div>' +
@@ -1599,18 +1616,21 @@ $(document).on('page_ready', function() {
   <?php
   // Actions to take when the start and end datepickers are closed
   ?>
-  $('#start_date, #end_date').on('change', function() {
+  startAndEndDates.on('change', function() {
 
     <?php
     // (1) If the end_datepicker isn't visible and we change the start_datepicker,
     //     then set the end date to be the same as the start date.  (This will be
-    //     the case if multiday bookings are not allowed)
+    //     the case if multi-day bookings are not allowed)
     ?>
+
+    var endDate = $('#end_date');
+
     if ($(this).attr('id') === 'start_date')
     {
-      if ($('#end_date').css('visibility') === 'hidden')
+      if (endDate.css('visibility') === 'hidden')
       {
-        $('#end_date').val($('#start_date').val());
+        endDate.val($(this).val());
       }
     }
 
@@ -1621,17 +1641,9 @@ $(document).on('page_ready', function() {
     ?>
     if (getDateDifference() < 0)
     {
-      var fp;
-      if ($(this).attr('id') === 'start_date')
-      {
-        fp = document.querySelector("#end_date")._flatpickr;
-        fp.setDate($('#start_date').val());
-      }
-      else
-      {
-        fp = document.querySelector("#start_date")._flatpickr;
-        fp.setDate($('#end_date').val());
-      }
+      var selector = ($(this).attr('id') === 'start_date') ? '#end_date' : '#start_date';
+      var fp = document.querySelector(selector)._flatpickr;
+      fp.setDate($(this).val());
     }
 
     <?php
@@ -1654,7 +1666,7 @@ $(document).on('page_ready', function() {
 
   });
 
-  $('#start_date, #end_date').each(function() {
+  startAndEndDates.each(function() {
       checkTimeSlots($(this));
     });
 

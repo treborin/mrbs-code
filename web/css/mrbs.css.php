@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require_once "../systemdefaults.inc.php";
@@ -110,7 +111,7 @@ button.image {
   float: left;
   width: 100%;
   box-sizing: border-box;
-  padding-bottom: 3rem;
+  padding-bottom: 2rem;
 }
 
 h1 {
@@ -151,10 +152,7 @@ if ($display_mincals_above)
 
     .minicalendars.formed {
       display: flex;
-      flex-wrap: wrap;
       justify-content: center;
-      max-height: 18em;
-      overflow: hidden;
       margin-right: 0;
     }
 
@@ -199,6 +197,7 @@ if ($display_mincals_above)
 .index :not(.simple) + .contents {
   display: -ms-flexbox;
   display: flex;
+  overflow-y: hidden;
 }
 
 .view_container {
@@ -206,6 +205,9 @@ if ($display_mincals_above)
   flex-grow: 1;
   width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 img {
@@ -275,10 +277,6 @@ tr:nth-child(even) td.new.holiday,
 .style_weekends tr:nth-child(even) td.new.weekend.holiday,
 .style_weekends .all_rooms tr:nth-child(even) td.weekend.holiday {
   background-color: <?php echo $row_even_color_weekend_holiday ?>;
-}
-
-.all_rooms td {
-  height: 100%; <?php // for Firefox ?>
 }
 
 .dwm_main.all_rooms td a {
@@ -646,14 +644,49 @@ nav.arrow a:focus {
   text-decoration: none;
 }
 
+nav a.symbol::before {
+  font-size: large;
+  line-height: 0;
+}
+
 nav a.prev::before {
-  content: '\00276e';  /* HEAVY LEFT-POINTING ANGLE QUOTATION MARK ORNAMENT */
+  content: '\002039';  /* Single left-pointing angle quotation mark */
 }
 
-nav a.next::after {
-  content: '\00276f';  /* HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT */
+nav a.next::before {
+  content: '\00203a';  /* Single left-pointing angle quotation mark */
 }
 
+nav a.prev.week::before {
+  content: '\0000ab';  /* Left-pointing double angle quotation mark */
+}
+
+nav a.next.week::before {
+  content: '\0000bb';  /* Right-pointing double angle quotation mark */
+}
+
+<?php // Don't display the << and >> buttons on narrow screens ?>
+@media (max-width: 30rem) {
+  nav a.week {
+    display: none;
+  }
+}
+
+.message_top {
+  font-weight: bold;
+  color: red;
+}
+
+.admin .message_top {
+  font-weight: normal;
+  font-style: italic;
+  padding-left: 2em;
+  color: <?php echo $standard_font_color ?>;
+}
+
+.admin h2:not(:first-child) {
+  margin-top: 2em;
+}
 
 /* ------------ ADMIN.PHP ---------------------------*/
 
@@ -711,6 +744,13 @@ div#div_custom_html {
 
 /* ------------ INDEX.PHP ------------------*/
 
+body.index {
+  max-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+}
+
 .date_nav {
   float: left;
   width: 100%;
@@ -750,18 +790,43 @@ div#div_custom_html {
 .table_container {
   overflow: auto;
   position: relative;
+  margin: 1em 0;
+}
+
+<?php
+// Normally the scrolling is confined to the table container, but this doesn't
+// work on short screens when you can lose the table altogether in the flex box.
+// So for short screens we allow scrolling on both the table container and the
+// body and set a max height for the table container.
+// TODO: is there something better we can do for short screens?
+?>
+@media screen and (max-height: 50rem), screen and (max-width: 30rem) {
+  body.index {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .index :not(.simple) + .contents {
+    overflow-y: visible;
+  }
+
+  .view_container {
+    overflow-y: visible;
+  }
+
+  .table_container {
   <?php
   // A height is necessary to make sticky headers work. Set the maximum height to be the viewport's,
   // less a fixed amount, which allows for a small space at the top and bottom, giving a little bit
   // of context and making it easier to position the table container in the viewport.
   ?>
-  max-height: calc(100vh - 4em);
+    max-height: calc(100vh - 4em);
   <?php
   // For those browsers that support the max() function ensure that the maximum height is at least
   // a certain height, otherwise the element becomes too small to be meaningful.
   ?>
-  max-height: max(calc(100vh - 4em), 8em);
-  margin: 1em 0;
+    max-height: max(calc(100vh - 4em), 8em);
+  }
 }
 
 div.timeline {
@@ -886,18 +951,18 @@ table.dwm_main {
   background-clip: padding-box; <?php // to keep Edge happy when using position: sticky ?>
 }
 
-.style_weekends .dwm_main thead th.weekend,
-.style_weekends .dwm_main tfoot th.weekend {
+.style_weekends .dwm_main thead th.weekend:not(.highlight),
+.style_weekends .dwm_main tfoot th.weekend:not(.highlight) {
   background-color: <?php echo $row_even_color_weekend ?>
 }
 
-.dwm_main thead th.holiday,
-.dwm_main tfoot th.holiday {
+.dwm_main thead th.holiday:not(.highlight),
+.dwm_main tfoot th.holiday:not(.highlight) {
   background-color: <?php echo $row_even_color_holiday ?>
 }
 
-.style_weekends .dwm_main thead th.weekend.holiday,
-.style_weekends .dwm_main tfoot th.weekend.holiday {
+.style_weekends .dwm_main thead th.weekend.holiday:not(.highlight),
+.style_weekends .dwm_main tfoot th.weekend.holiday:not(.highlight) {
   background-color: <?php echo $row_even_color_weekend_holiday ?>
 }
 
@@ -1367,11 +1432,13 @@ tbody th a:hover {
   background-color: <?php echo $row_highlight_color ?>;
 }
 
-.dwm_main tbody tr:hover th {
+.dwm_main tbody tr:hover th,
+.dwm_main th.highlight {
   background-color: <?php echo $row_highlight_color ?>;
 }
 
-.dwm_main tbody tr:hover th a {
+.dwm_main tbody tr:hover th a,
+.dwm_main th.highlight a {
   color: #ffffff;
 }
 
@@ -2373,7 +2440,7 @@ button#delete_button {
 
 h3.search_results {
   clear: left;
-  margin-bottom: 0;
+  margin-bottom: 1em;
   padding-top: 2em;
 }
 
@@ -2481,6 +2548,7 @@ div#site_faq_body {
 
 .view_entry #registrant_list {
   padding-left: 1em;
+  margin-bottom: 1em;
 }
 
 .view_entry #registrants thead th {

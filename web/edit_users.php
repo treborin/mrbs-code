@@ -43,9 +43,9 @@ use MRBS\Form\Form;
 
 require "defaultincludes.inc";
 
-if ($auth['type'] != 'db')
+if (!auth()->canCreateUsers())
 {
-  // You shouldn't be here unless you're using 'db' authentication
+  // You shouldn't be here unless you can create users
   location_header('index.php');
 }
 
@@ -159,9 +159,8 @@ function output_row($row)
   // You can only edit a user if you have sufficient admin rights, or else if that user is yourself
   if (can_edit_user($row['name']))
   {
-    $form = new Form();
-    $form->setAttributes(array('method' => 'post',
-                               'action' => multisite(this_page())));
+    $form = new Form(Form::METHOD_POST);
+    $form->setAttributes(array('action' => multisite(this_page())));
     $form->addHiddenInput('id', $row['id']);
     $submit = new ElementInputSubmit();
     $submit->setAttributes(array('class' => 'link',
@@ -222,20 +221,15 @@ function output_row($row)
           }
           break;
         case 'timestamp':
-          // Convert the SQL timestamp into a time value and back into a localised string and
-          // put the UNIX timestamp in a span so that the JavaScript can sort it properly.
-          $unix_timestamp = (isset($col_value)) ? strtotime($col_value) : 0;
-          if (($unix_timestamp === false) || ($unix_timestamp < 0))
-          {
-            // To cater for timestamps before the start of the Unix Epoch
-            $unix_timestamp = 0;
-          }
-          $values[] = "<span title=\"$unix_timestamp\"></span>" .
-                      (($unix_timestamp) ? time_date_string($unix_timestamp) : '');
-          break;
+          // Use the 'last_updated' value because it will have been converted
+          // from 'timestamp' using the correct timezone, ie the timezone of
+          // the database server.
+          $col_value = $row['last_updated'];
+          // Fall through
         case 'last_login':
-          $values[] = "<span title=\"$col_value\"></span>" .
-                      (($col_value) ? time_date_string($col_value) : '');
+          // Put the UNIX timestamp in a span so that the JavaScript can sort it properly.
+          $values[] = '<span title="' . (($col_value) ? htmlspecialchars($col_value) : '') . '"></span>' .
+                      (($col_value) ? htmlspecialchars(time_date_string($col_value)) : '');
           break;
         default:
           // Where there's an associative array of options, display
@@ -377,8 +371,7 @@ function get_field_email($params, $disabled=false)
   $field->setLabel($params['label'])
         ->setControlAttributes(array('name'     => $params['name'],
                                      'value'    => $params['value'],
-                                     'disabled' => $disabled,
-                                     'multiple' => true));
+                                     'disabled' => $disabled));
 
   if (null !== ($maxlength = maxlength('users.email')))
   {
@@ -503,7 +496,7 @@ function get_field_custom($custom_field, $params, $disabled=false)
     case 'FieldTextarea':
       if ($class == 'FieldTextarea')
       {
-        $field->setControlText($params['value']);
+        $field->setControlText($params['value'] ?? '');
       }
       else
       {
@@ -820,11 +813,10 @@ if (isset($action) && ( ($action == "edit") or ($action == "add") ))
     }
   }
 
-  $form = new Form();
+  $form = new Form(Form::METHOD_POST);
 
   $form->setAttributes(array('id'     => 'form_edit_users',
                              'class'  => 'standard',
-                             'method' => 'post',
                              'action' => multisite(this_page())));
 
   if (isset($id))
@@ -1132,17 +1124,14 @@ if (isset($action) && ($action == "update"))
     // we assume that the user is trying to nullify the value.
     if ($field['type'] == 'date')
     {
-      if (!validate_iso_date($values[$field['name']]))
+      if ($field['is_nullable'] && (!isset($values[$field['name']]) || ($values[$field['name']] === '')))
       {
-        if ($field['is_nullable'] && ($values[$field['name']] === ''))
-        {
-          $values[$field['name']] = null;
-        }
-        else
-        {
-          $valid_data = false;
-          $q_string .= "&invalid_dates[]=" . urlencode($field['name']);
-        }
+        $values[$field['name']] = null;
+      }
+      elseif (!validate_iso_date($values[$field['name']]))
+      {
+        $valid_data = false;
+        $q_string .= "&invalid_dates[]=" . urlencode($field['name']);
       }
     }
   }
@@ -1314,10 +1303,9 @@ if (!$is_ajax)
 
   if (is_user_admin()) /* Administrators get the right to add new users */
   {
-    $form = new Form();
+    $form = new Form(Form::METHOD_POST);
 
     $form->setAttributes(array('id'     => 'add_new_user',
-                               'method' => 'post',
                                'action' => multisite(this_page())));
 
     $form->addHiddenInput('action', 'add');

@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Form\ElementFieldset;
@@ -101,7 +102,7 @@ function get_custom_fields($data)
         $field->setLabel($label)
               ->setControlAttributes(array('name'     => $name,
                                            'disabled' => $disabled))
-              ->setControlText($value);
+              ->setControlText($value ?? '');
       }
       // Otherwise output a text input
       else
@@ -121,7 +122,7 @@ function get_custom_fields($data)
 }
 
 
-function get_fieldset_errors($errors)
+function get_fieldset_errors(array $errors) : ElementFieldset
 {
   $fieldset = new ElementFieldset();
   $fieldset->addLegend('')
@@ -138,7 +139,7 @@ function get_fieldset_errors($errors)
 }
 
 
-function get_fieldset_general($data)
+function get_fieldset_general(array $data) : ElementFieldset
 {
   global $auth;
 
@@ -244,7 +245,7 @@ function get_fieldset_general($data)
     $field->setLabel(get_vocab('custom_html'))
           ->setLabelAttribute('title', get_vocab('custom_html_note'))
           ->setControlAttribute('name', 'custom_html')
-          ->setControlText($data['custom_html']);
+          ->setControlText($data['custom_html'] ?? '');
     $fieldset->addElement($field);
   }
 
@@ -299,12 +300,11 @@ if (empty($room) || is_null($data = get_room_details($room)))
 $errors = get_form_var('errors', 'array');
 
 // Generate the form
-$form = new Form();
+$form = new Form(Form::METHOD_POST);
 
 $attributes = array('id'     => 'edit_room',
                     'class'  => 'standard',
-                    'action' => multisite('edit_room_handler.php'),
-                    'method' => 'post');
+                    'action' => multisite('edit_room_handler.php'));
 
 // Non-admins will only be allowed to view room details, not change them
 $legend = (is_admin()) ? get_vocab('editroom') : get_vocab('viewroom');

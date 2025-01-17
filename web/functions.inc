@@ -1,8 +1,10 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use DateInterval;
 use DateTimeZone;
+use MRBS\Form\Field;
 use MRBS\Form\FieldSelect;
 use MRBS\ICalendar\RFC5545;
 use PHPMailer\PHPMailer\PHPMailer;
@@ -74,7 +76,7 @@ function generate_token(int $length) : string
     return bin2hex(openssl_random_pseudo_bytes($length));
   }
 
-  return md5(uniqid(rand(), true));
+  return md5(uniqid((string)rand(), true));
 }
 
 
@@ -706,7 +708,7 @@ function location_header(string $location) : void
 {
   global $debug;
 
-  if ($debug && (version_compare(MRBS_MIN_PHP_VERSION, 8.1) >= 0))
+  if ($debug && (version_compare(MRBS_MIN_PHP_VERSION, '8.1') >= 0))
   {
     trigger_error("The return type can be changed to 'never'.", E_USER_NOTICE);
   }
@@ -917,7 +919,7 @@ function print_footer(bool $and_exit=false) : void
 // is used to specify a maximum size of unit to use.  For example if
 // it is set to 'minutes', 3600 seconds will give 60 minutes rather
 // than 1 hour.
-function toTimeString(&$dur, &$units, $translate=true, $max_unit=null)
+function toTimeString(int &$dur, &$units, bool $translate=true, ?string $max_unit=null)
 {
   if (!isset($max_unit))
   {
@@ -1017,31 +1019,38 @@ function fromTimeString(&$units, $dur_units)
 
 // Gets the interval in periods for a booking with $start_time and $end_time
 // Takes account of DST
-function get_period_interval(int $start_time, int $end_time) : int
+function get_period_interval(int $start_time, int $end_time, int $area_id) : int
 {
-  global $periods;
+  static $area_details = [];
 
-  $periods_per_day = count($periods);
+  if (!isset($area_details[$area_id]))
+  {
+    $area_details[$area_id] = get_area_details($area_id);
+  }
 
-  // Need to use the MRBS version of DateTime to get round a bug in modify()
-  // in PHP before 5.3.6.  As we are in the MRBS namespace we will get the
-  // MRBS version.
+  $periods_per_day = count(json_decode($area_details[$area_id]['periods']));
+  $date_time_zone = new DateTimeZone($area_details[$area_id]['timezone']);
+
+  // Create start and end dates and set both dates to noon so that we can compare them
+  // and get an integral number of days difference.  Noon also happens to be when
+  // periods start, so will be useful in a moment.
   $startDate = new DateTime();
-  $startDate->setTimestamp($start_time);
-  $endDate = new DateTime();
-  $endDate->setTimestamp($end_time);
+  $startDate
+    ->setTimezone($date_time_zone)
+    ->setTimestamp($start_time)
+    ->modify('12:00');
 
-  // Set both dates to noon so that we can compare them and get an integral
-  // number of days difference.  Noon also happens to be when periods start,
-  // so will be useful in a moment.
-  $startDate->modify('12:00');
-  $endDate->modify('12:00');
+  $endDate = new DateTime();
+  $endDate
+    ->setTimezone($date_time_zone)
+    ->setTimestamp($end_time)
+    ->modify('12:00');
 
   // Calculate the difference in days
   $interval = $startDate->diff($endDate);
-  $interval_days = $interval->format('%a');
+  $interval_days = intval($interval->format('%a'));
 
-  if ($interval_days == 0)
+  if ($interval_days === 0)
   {
     // If the interval starts and ends on the same day, then we just calculate the number
     // of periods by calculating the number of minutes between the start and end times.
@@ -1051,11 +1060,11 @@ function get_period_interval(int $start_time, int $end_time) : int
   {
     // Otherwise we calculate the number of periods on the first day
     $startDate->add(new DateInterval('PT' . $periods_per_day . 'M'));
-    $result = get_period_interval($start_time, $startDate->getTimestamp());
+    $result = get_period_interval($start_time, $startDate->getTimestamp(), $area_id);
     // Add in the number of whole days worth of periods in between
     $result += ($interval_days - 1) * $periods_per_day;
     // And add in the number of periods on the last day
-    $result += get_period_interval($endDate->getTimestamp(), $end_time);
+    $result += get_period_interval($endDate->getTimestamp(), $end_time, $area_id);
   }
 
   return (int) $result;
@@ -1146,45 +1155,6 @@ function date_byday(int $timestamp) : string
     $ord = -1;
   }
   return $ord . $dow;
-}
-
-
-// Converts a BYDAY (eg "2SU") value for a given year and month into a
-// day of the month.   Returns FALSE if the day does not exist (eg for "5SU"
-// when there are only four Sundays in the month)
-function byday_to_day(int $year, int $month, string $byday)
-{
-  // First of all normalise the month and year, as we allow $month > 12
-  while ($month > 12)
-  {
-    $month -= 12;
-    $year++;
-  }
-  // Get the ordinal number and the day of the week
-  list('ordinal' => $ord, 'day' => $dow) = RFC5545::parseByday($byday);
-  // Get the starting day of the month
-  $start_dom = ($ord > 0) ? 1 : date('t', mktime(0, 0, 0, $month, 1, $year));
-  // Get the starting day of the week
-  $start_dow = date('w', mktime(0, 0, 0, $month, $start_dom, $year));
-  // Turn the BYDAY day of the week into an integer
-  $byday_dow = RFC5545::convertDayToOrd($dow);
-  // get the difference in days
-  $diff = $byday_dow - $start_dow;
-  $diff += ($ord > 0) ? DAYS_PER_WEEK : -DAYS_PER_WEEK;
-  $diff = $diff %DAYS_PER_WEEK;
-  // add in the weeks
-  $diff += ($ord > 0) ? ($ord - 1) * DAYS_PER_WEEK : ($ord + 1) * DAYS_PER_WEEK;
-
-  $day = $start_dom + $diff;
-
-  if (checkdate($month, $day, $year))
-  {
-    return $day;
-  }
-  else
-  {
-    return false;
-  }
 }
 
 
@@ -1375,7 +1345,7 @@ function get_duration(int $start_time, int $end_time, bool $enable_periods, int 
   if ($enable_periods)
   {
     $periods_per_day = count($period_names[$area_id]);
-    $n_periods = get_period_interval($start_time, $end_time);  // this handles DST
+    $n_periods = get_period_interval($start_time, $end_time, $area_id);  // this handles DST
     if (($n_periods % $periods_per_day) == 0)
     {
       $result['duration'] =  intval($n_periods/$periods_per_day);
@@ -1538,7 +1508,8 @@ function clean_area_row(array $row) : array
   // not make any assumptions about the existence of extra columns in
   // the area table.
 
-  // Cast the columns to their intended types
+  // Cast the columns to their intended types (the pseudo-booleans will
+  // be picked up later)
   row_cast_columns($row, 'area');
 
   // Get the default settings if necessary
@@ -1546,6 +1517,12 @@ function clean_area_row(array $row) : array
 
   foreach ($columns as $column)
   {
+    // Cast the pseudo-booleans to bools
+    if (isset($row[$column->name]) && ($column->getNature() == Column::NATURE_INTEGER) && ($column->getLength() <=2))
+    {
+      $row[$column->name] = (bool)$row[$column->name];
+    }
+
     if (array_key_exists($column->name, $area_defaults))
     {
       // If the "per area" setting is in the database, then use that.  Otherwise
@@ -1722,7 +1699,7 @@ function get_area_settings(int $area) : void
 }
 
 
-// generate the predicate for use in an SQL query to test whether
+// Generate the predicate for use in an SQL query to test whether
 // an area has $field set
 function some_area_predicate(string $field) : string
 {
@@ -1736,18 +1713,51 @@ function some_area_predicate(string $field) : string
   return $predicate;
 }
 
+
+// Generate the predicate for use in an SQL query to test whether
+// an area does not have $field set
+function some_area_predicate_not(string $field) : string
+{
+  global $area_defaults;
+
+  $predicate = "(($field IS NOT NULL) AND ($field = 0))";
+  if (empty($area_defaults[$field]))
+  {
+    $predicate = "(" . $predicate . " OR ($field IS NULL))";
+  }
+  return $predicate;
+}
+
+
 // Determines whether there is at least one area with the relevant $field
-// set (eg 'approval_enabled' or 'confirmation_enabled').   If $enabled
+// set (eg 'approval_enabled' or 'confirmation_enabled').   If $only_enabled
 // is TRUE then the search is limited to enabled areas
 //
 // Returns: boolean
-function some_area(string $field, bool $enabled=false) : bool
+function some_area(string $field, bool $only_enabled=false, bool $not=false) : bool
 {
-  $predicate = some_area_predicate($field);
+  $predicate = ($not) ? some_area_predicate_not($field) : some_area_predicate($field);
   $sql = "SELECT COUNT(*) FROM " . _tbl('area') . " WHERE $predicate";
-  $sql .= ($enabled) ? " AND disabled=0" : "";
+  $sql .= ($only_enabled) ? " AND disabled=0" : "";
   $sql .= " LIMIT 1";
+
   return (db()->query1($sql) > 0);
+}
+
+
+// Determines whether there is at least one area with periods enabled.
+// If $only_enabled is TRUE then the search is limited to enabled areas
+function periods_somewhere(bool $only_enabled=false) : bool
+{
+  return some_area('enable_periods', $only_enabled);
+}
+
+
+// Determines whether there is at least one area with times enabled.
+// If $only_enabled is TRUE then the search is limited to enabled areas
+function times_somewhere(bool $only_enabled=false) : bool
+{
+  return some_area('enable_periods', $only_enabled, true);
 }
 
 
@@ -1755,15 +1765,8 @@ function some_area(string $field, bool $enabled=false) : bool
 // to make sure it's a valid date
 function format_iso_date(int $year, int $month, int $day) : string
 {
-  if (!checkdate($month, $day, $year))
-  {
-    $date = getdate(mktime(12, 0, 0, $month, $day, $year));
-    $year = $date['year'];
-    $month = $date['mon'];
-    $day = $date['mday'];
-  }
-
-  return sprintf("%04d-%02d-%02d", $year, $month, $day);
+  $date = new DateTime();
+  return $date->setDate($year, $month, $day)->format(DateTime::ISO8601_DATE);
 }
 
 
@@ -1772,7 +1775,7 @@ function format_iso_date(int $year, int $month, int $day) : string
 // on failure.
 function split_iso_date(string $iso_date)
 {
-  if (false === ($date = DateTime::createFromFormat('Y-m-d', $iso_date)))
+  if (false === ($date = DateTime::createFromFormat(DateTime::ISO8601_DATE, $iso_date)))
   {
     return false;
   }
@@ -1792,7 +1795,7 @@ function validate_iso_date(string $date) : bool
   // the inverse operation gives the original string then it is
   // valid.  (This is to check that, for example, 2021-09-31 hasn't
   // been converted into 2021-10-01).
-  $format = 'Y-m-d';
+  $format = DateTime::ISO8601_DATE;
   $datetime = DateTime::createFromFormat($format, $date);
 
   return ($datetime && ($datetime->format($format) === $date));
@@ -1800,7 +1803,7 @@ function validate_iso_date(string $date) : bool
 
 
 // Get the local day name based on language.
-function day_name(int $day_number, array $format=null, string $locale=null) : string
+function day_name(int $day_number, ?array $format=null, ?string $locale=null) : string
 {
   global $datetime_formats;
 
@@ -1878,25 +1881,26 @@ function hour_min(int $s) : string
 }
 
 
-function period_date_string(int $t, int $area_id, int $mod_time=0) : array
+function period_date_string(int $t, int $area_id, bool $previous_period=false) : array
 {
   global $datetime_formats;
 
-  $period_names = get_period_names();
-
+  $period_names = get_period_names()[$area_id];
+  $n_periods = count($period_names);
   $time = getdate($t);
-  $p_num = $time["minutes"] + $mod_time;
-  if( $p_num < 0 )
+  $p = $time['minutes'];
+
+  if ($previous_period)
   {
-    $p_num = 0;
+    $p--;
   }
-  if( $p_num >= count($period_names[$area_id]) - 1 )
-  {
-    $p_num = count($period_names[$area_id]) - 1;
-  }
+
+  $p = max($p, 0);
+  $p = min($p, $n_periods - 1);
+
   // The separator is a ',' as a '-' leads to an ambiguous
   // display in report.php when showing end times.
-  return array($p_num, $period_names[$area_id][$p_num] . ', ' . datetime_format($datetime_formats['date'], $t));
+  return array($p, $period_names[$p] . ', ' . datetime_format($datetime_formats['date'], $t));
 }
 
 
@@ -2083,8 +2087,19 @@ function period_name_nominal(int $s) : string
 }
 
 
+// Returns the name of the period represented by the timestamp $timestamp
+function period_name_timestamp(int $timestamp) : string
+{
+  global $periods;
+
+  $index = period_index_timestamp($timestamp);
+
+  return $periods[$index] ?? unknown_period_name($index);
+}
+
+
 // Returns the name of a period that doesn't exist
-function unknown_period_name($index) : string
+function unknown_period_name(int $index) : string
 {
   return get_vocab('unknown_period', $index);
 }
@@ -2260,9 +2275,9 @@ function shift_to_workday(int $time) : int
   if ($skip_back != 0)
   {
     // set the time to the end of the working day
-    $d = date('j', $time) - $skip_back;
-    $m = date('n', $time);
-    $y  = date('Y', $time);
+    $d = intval(date('j', $time)) - $skip_back;
+    $m = intval(date('n', $time));
+    $y = intval(date('Y', $time));
     $time = mktime(23, 59, 59, $m, $d, $y);
   }
   return $time;
@@ -2308,8 +2323,8 @@ function working_time_diff(int $now, int $then) : int
   // (b) the number of non-working days in the part week
 
   // First let's calculate (a)
-  $last = mktime(12, 0, 0, date('n', $last), date('j', $last), date('Y', $last));
-  $first = mktime(12, 0, 0, date('n', $first), date('j', $first), date('Y', $first));
+  $last = mktime(12, 0, 0, (int)date('n', $last), (int)date('j', $last), (int)date('Y', $last));
+  $first = mktime(12, 0, 0, (int)date('n', $first), (int)date('j', $first), (int)date('Y', $first));
   $days_diff = (int) round(($last - $first)/SECONDS_PER_DAY);  // the difference in days
   $whole_weeks = (int) floor($days_diff/DAYS_PER_WEEK);  // the number of whole weeks between the two
   $non_working_days = $whole_weeks * (DAYS_PER_WEEK - $n_working_days);
@@ -2341,7 +2356,7 @@ function working_time_diff(int $now, int $then) : int
 
 
 // checks whether a given day of the week is supposed to be hidden in the display
-function is_hidden_day($dow) : bool
+function is_hidden_day(int $dow) : bool
 {
   global $hidden_days;
 
@@ -2351,7 +2366,7 @@ function is_hidden_day($dow) : bool
 
 // Checks whether a given day of the week is a weekend day.
 // $dow is in the range [0..6].
-function is_weekend($dow) : bool
+function is_weekend(int $dow) : bool
 {
   global $weekdays;
 
@@ -2361,7 +2376,7 @@ function is_weekend($dow) : bool
 
 // returns true if event should be considered private based on
 // config settings and event's privacy status (passed to function)
-function is_private_event($privacy_status)
+function is_private_event(bool $privacy_status) : bool
 {
   global $private_override;
   if ($private_override == "private" )
@@ -2454,6 +2469,15 @@ function is_cli() : bool
 }
 
 
+// Determine whether this is a GET request
+function is_get_request() : bool
+{
+  global $server;
+
+  return ($server['REQUEST_METHOD'] === 'GET');
+}
+
+
 // Determines whether we are in kiosk mode
 function is_kiosk_mode() : bool
 {
@@ -2475,7 +2499,7 @@ function mrbs_ignore_user_abort(bool $set) : void
 
   if (!isset($original_state))
   {
-    $original_state = ignore_user_abort();
+    $original_state = boolval(ignore_user_abort());
   }
 
   // Set ignore_user_abort
@@ -2483,7 +2507,7 @@ function mrbs_ignore_user_abort(bool $set) : void
   {
     if ($outstanding_requests == 0)
     {
-      ignore_user_abort(1);
+      ignore_user_abort(true);
     }
     $outstanding_requests++;
   }
@@ -2513,19 +2537,14 @@ function get_server_software() : string
     }
   }
 
-  if (isset($server['SERVER_SOFTWARE']))
-  {
-    return $server['SERVER_SOFTWARE'];
-  }
-
-  return '';
+  return $server['SERVER_SOFTWARE'] ?? '';
 }
 
 
 
-function get_field_entry_input($params)
+function get_field_entry_input(array $params) : Field
 {
-  global $select_options, $datalist_options;
+  global $select_options, $datalist_options, $text_input_max;
 
   if (isset($params['field']))
   {
@@ -2537,13 +2556,21 @@ function get_field_entry_input($params)
     {
       $class = 'FieldInputDatalist';
     }
-    elseif ($params['field'] == 'entry.description')
-    {
-      $class = 'FieldTextarea';
-    }
     else
     {
-      $class = 'FieldInputText';
+      $columns = Columns::getInstance(_tbl('entry'));
+      $column_name = preg_replace('/^entry./', '', $params['field']);
+      $column = $columns->getColumnByName($column_name);
+      if (!in_array($column_name, ['name', 'create_by']) &&  // special cases
+          ($column->getNature() === Column::NATURE_CHARACTER) &&
+          ($column->getLength() > $text_input_max))
+      {
+        $class = 'FieldTextarea';
+      }
+      else
+      {
+        $class = 'FieldInputText';
+      }
     }
   }
   else
@@ -2589,7 +2616,7 @@ function get_field_entry_input($params)
     case 'FieldTextarea':
       if ($class == 'FieldTextarea')
       {
-        $field->setControlText($params['value']);
+        $field->setControlText($params['value'] ?? '');
       }
       else
       {
@@ -2627,7 +2654,7 @@ function get_field_entry_input($params)
 //    field       the field name, eg 'entry.create_by'
 //    label       the field label
 //    name        the field name
-function get_user_field(array $params, $datalist=false)
+function get_user_field(array $params, bool $datalist=false) : Field
 {
   if (method_exists(auth(), 'getUsernames'))
   {

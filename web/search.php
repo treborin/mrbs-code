@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Form\ElementFieldset;
@@ -13,9 +14,8 @@ require "defaultincludes.inc";
 
 function get_search_nav_button(array $hidden_inputs, string $value, bool $disabled=false) : string
 {
-  $form = new Form();
-  $form->setAttributes(array('action' => multisite(this_page()),
-                             'method' => 'post'));
+  $form = new Form(Form::METHOD_POST);
+  $form->setAttributes(array('action' => multisite(this_page())));
   $form->addHiddenInputs($hidden_inputs);
   $submit = new ElementInputSubmit();
   $submit->setAttributes(array('value'    => $value,
@@ -66,7 +66,7 @@ function output_row($row, $returl)
 {
   global $is_ajax, $json_data, $view;
 
-  $vars = array('id'     => $row['entry_id'],
+  $vars = array('id'     => $row['id'],
                 'returl' => $returl);
 
   $query = http_build_query($vars, '', '&');
@@ -125,7 +125,7 @@ $search_str = get_form_var('search_str', 'string');
 $search_pos = get_form_var('search_pos', 'int');
 $total = get_form_var('total', 'int');
 $datatable = get_form_var('datatable', 'int');  // Will only be set if we're using DataTables
-// Get the start day/month/year and make them the current day/month/year
+$ics = get_form_var('ics', 'bool', false);
 $from_date = get_form_var('from_date', 'string');
 
 // If we're going to be doing something then check the CSRF token
@@ -158,7 +158,7 @@ if (isset($from_date))
 {
   if (validate_iso_date($from_date))
   {
-    $search_start_time = DateTime::createFromFormat('Y-m-d', $from_date)->getTimestamp();
+    $search_start_time = DateTime::createFromFormat(DateTime::ISO8601_DATE, $from_date)->setTime(0, 0)->getTimestamp();
   }
   else
   {
@@ -166,7 +166,7 @@ if (isset($from_date))
   }
 }
 
-if (!$is_ajax) {
+if (!($is_ajax || $ics)) {
   $context = array(
     'view' => $view,
     'view_all' => $view_all,
@@ -179,11 +179,12 @@ if (!$is_ajax) {
 
   print_header($context);
 
-  $form = new Form();
-  $form->setAttributes(array('class' => 'standard',
+  $form = new Form(Form::METHOD_POST);
+  $form->setAttributes(array(
+    'class' => 'standard',
     'id' => 'search_form',
-    'method' => 'post',
-    'action' => multisite(this_page())));
+    'action' => multisite(this_page()))
+  );
 
   $fieldset = new ElementFieldset();
   $fieldset->addLegend(get_vocab('search'));
@@ -335,7 +336,7 @@ if (!isset($total))
   $total = db()->query1($sql, $sql_params);
 }
 
-if (($total <= 0) && !$is_ajax)
+if (($total <= 0) && !($is_ajax || $ics))
 {
   echo "<p id=\"nothing_found\">" . get_vocab("nothing_found") . "</p>\n";
   print_footer();
@@ -354,11 +355,12 @@ else if($search_pos >= $total)
 // If we're Ajax capable and this is not an Ajax request then don't output
 // the table body, because that's going to be sent later in response to
 // an Ajax request - so we don't need to do the query
-if (!$ajax_capable || $is_ajax)
+if (!$ajax_capable || $is_ajax || $ics)
 {
   // Now we set up the "real" query
-  $sql = "SELECT E.id AS entry_id, E.create_by, E.name, E.description, E.start_time,
-                 E.room_id, R.area_id, A.enable_periods
+  $sql = "SELECT E.*, " .
+                db()->syntax_timestamp_to_unix("E.timestamp") . " AS last_updated, " .
+                "A.area_name, R.room_name, R.area_id, A.enable_periods
             FROM " . _tbl('entry') . " E
        LEFT JOIN " . _tbl('room') . " R
               ON E.room_id = R.id
@@ -366,9 +368,9 @@ if (!$ajax_capable || $is_ajax)
               ON R.area_id = A.id
            WHERE $sql_pred
         ORDER BY E.start_time asc";
-  // If it's an Ajax query we want everything.  Otherwise we use LIMIT to just get
+  // If it's an Ajax query or an ics export we want everything.  Otherwise we use LIMIT to just get
   // the stuff we want.
-  if (!$is_ajax)
+  if (!($is_ajax || $ics))
   {
     $sql .= " " . db()->syntax_limit($search["count"], $search_pos);
   }
@@ -378,12 +380,12 @@ if (!$ajax_capable || $is_ajax)
   $num_records = $result->count();
 }
 
-if (!$ajax_capable)
+if (!($ajax_capable || $ics))
 {
   echo generate_search_nav_html($search_pos, $total, $num_records, $search_str);
 }
 
-if (!$is_ajax)
+if (!($is_ajax || $ics))
 {
   echo "<div id=\"search_output\" class=\"datatable_container\">\n";
   echo "<table id=\"search_results\" class=\"admin_table display\"";
@@ -408,6 +410,20 @@ if (!$is_ajax)
   echo "<tbody>\n";
 }
 
+if ($ics)
+{
+  $filename = "$search_filename.ics";
+  $content_type = "application/ics; charset=" . get_charset() . "; name=\"$filename\"";
+  http_headers(array(
+    "Content-Type: $content_type",
+    "Content-Disposition: attachment; filename=\"$filename\"")
+  );
+  // We set $keep_private to FALSE here because we excluded all private
+  // events in the SQL query
+  export_icalendar($result, false);
+  exit;
+}
+
 // If we're Ajax capable and this is not an Ajax request then don't output
 // the table body, because that's going to be sent later in response to
 // an Ajax request
@@ -417,6 +433,8 @@ if (!$ajax_capable || $is_ajax)
 
   while (false !== ($row = $result->next_row_keyed()))
   {
+    row_cast_columns($row, 'entry');
+    $row['area_id'] = (int) $row['area_id'];
     output_row($row, $returl);
   }
 }

@@ -1,16 +1,42 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
+
+use MRBS\Intl\FormatterFlatpickr;use MRBS\Intl\IntlDatePatternConverter;
 
 require "../defaultincludes.inc";
 
-http_headers(array("Content-type: application/x-javascript"),
-             60*30);  // 30 minute expiry
-
-if ($use_strict)
+// We use ICU datetime patterns in the config file rather than flatpickr formatting
+// tokens so that we can switch to a different datepicker if necessary, without
+// having to change the config settings.
+function get_date_format() : string
 {
-  echo "'use strict';\n";
+  global $datetime_formats;
+
+  if (isset($datetime_formats['datepicker']['pattern']))
+  {
+    try
+    {
+      $converter = new IntlDatePatternConverter(new FormatterFlatpickr());
+      return $converter->convert($datetime_formats['datepicker']['pattern']);
+    }
+    catch (\Exception $e)
+    {
+      // Report the error and fall through to the 'custom' format
+      trigger_error($e->getMessage(), E_USER_WARNING);
+    }
+  }
+
+  return 'custom';
 }
 
+http_headers(array("Content-type: application/x-javascript"),
+             60*30);  // 30 minute expiry
+?>
+
+'use strict';
+
+<?php
 // Fix for iOS 13 where the User Agent string has been changed.
 // See https://github.com/flatpickr/flatpickr/issues/1992
 ?>
@@ -182,25 +208,22 @@ $(document).on('page_ready', function() {
 
   var onDayCreate = function(dObj, dStr, fp, dayElem) {
       <?php
-      // If this is a hidden day and the user is a booking admin then add a class to
-      // the day so that it can be styled differently.  If they're not a booking admin
-      // the day will be disabled - see later on in this file.
-      if (!empty($hidden_days))
-      {
-        ?>
-        if (args.isBookAdmin)
-        {
-          var hiddenDays = [<?php echo implode(',', $hidden_days)?>];
-          if (hiddenDays.indexOf(dayElem.dateObj.getDay()) >= 0) {
-            dayElem.classList.add('mrbs-hidden');
-          }
-        }
-        <?php
-      }
+      // If the datepicker is used for navigation, and this is a hidden day, and the user is
+      // a booking admin, then add a class to the day so that it can be styled differently.
+      // If they're not a booking admin, and it's a navigation datepicker, the day will be
+      // disabled - see later on in this file.
       ?>
+      const hiddenDays = [<?php echo implode(',', $hidden_days)?>];
+      if (hiddenDays.length &&
+          args.isBookAdmin &&
+          fp.altInput.classList.contains('navigation') &&
+          (hiddenDays.indexOf(dayElem.dateObj.getDay()) >= 0))
+      {
+        dayElem.classList.add('mrbs-hidden');
+      }
 
       <?php // And add a class if it's a weekend day ?>
-      var weekDays = [<?php echo implode(',', $weekdays)?>];
+      const weekDays = [<?php echo implode(',', $weekdays)?>];
       if (weekDays.indexOf(dayElem.dateObj.getDay()) < 0) {
         dayElem.classList.add('mrbs-weekend');
       }
@@ -262,12 +285,21 @@ $(document).on('page_ready', function() {
 
   var lastValidDate = {};
 
+  <?php
+  $date_format = get_date_format();
+  ?>
+
   var config = {
       plugins: [iPadMobileFix()],
       dateFormat: 'Y-m-d',
       altInput: true,
-      altFormat: 'custom',
-      formatDate: formatDate,
+      altFormat: <?php echo "'" . get_date_format() . "'" ?>,
+      <?php
+      if ($date_format == 'custom')
+      {
+        echo "formatDate: formatDate,\n";
+      }
+      ?>
       onDayCreate: onDayCreate,
       locale: {firstDayOfWeek: <?php echo $weekstarts ?>},
       onChange: function(selectedDates, dateStr, instance) {
@@ -306,7 +338,28 @@ $(document).on('page_ready', function() {
       }
     };
 
+
   <?php
+  // Setting weekNumbers causes flatpickr not to use the native datepickers on mobile
+  // devices.  As these are generally better than flatpickr's, it's probably better
+  // to have the native datepicker and do without the week numbers.
+  ?>
+  if (isMobile())
+  {
+    $('input.flatpickr-input').width('auto');
+  }
+  else
+  {
+    <?php // Only display the week number if the MRBS week starts on the first day of the week ?>
+    config.weekNumbers = <?php echo ($mincals_week_numbers && ($weekstarts == DateTime::firstDayOfWeek($timezone, get_mrbs_locale()))) ? 'true' : 'false' ?>;
+  }
+
+  flatpickr('input[type="date"]:not(.navigation)', config);
+
+  <?php
+  // For datepickers used for navigation we need to modify the config to take account
+  // of hidden days.
+
   // Disable hidden days, unless the user is a booking admin.  (If they're a booking
   // admin then they'll still be able to select the date, but it will be given a different
   // class so that it can be styled differently - see code above in this file.)
@@ -325,25 +378,10 @@ $(document).on('page_ready', function() {
   }
   ?>
 
+  flatpickr('input[type="date"].navigation', config);
 
   <?php
-  // Setting weekNumbers causes flatpickr not to use the native datepickers on mobile
-  // devices.  As these are generally better than flatpickr's, it's probably better
-  // to have the native datepicker and do without the week numbers.
-  ?>
-  if (isMobile())
-  {
-    $('input.flatpickr-input').width('auto');
-  }
-  else
-  {
-    <?php // Only display the week number if the week starts on a Monday (the start of the ISO week ?>
-    config.weekNumbers = <?php echo ($mincals_week_numbers && ($weekstarts == 1)) ? 'true' : 'false' ?>;
-  }
-
-  flatpickr('input[type="date"]', config);
-
-  <?php
+  // Build the mini-calendars, if required.
   if (!empty($display_mincals))
   {
     ?>
@@ -354,7 +392,8 @@ $(document).on('page_ready', function() {
       {
         for (var i = 0; i < 2; i++)
         {
-          div.append($('<span class="minicalendar" id="cal' + i + '"></span>'));
+          <?php // Add the 'navigation' class so that the JavaScript knows it can use hidden days ?>
+          div.append($('<span class="minicalendar navigation" id="cal' + i + '"></span>'));
         }
         config.inline = true;
         config.onMonthChange = onMonthChange;
@@ -370,7 +409,6 @@ $(document).on('page_ready', function() {
           <?php
         }
         ?>
-
 
         var minicalendars = flatpickr('span.minicalendar', config);
 

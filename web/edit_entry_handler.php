@@ -375,15 +375,19 @@ if (isset($month_relative_ord) && isset($month_relative_day))
   $month_relative = $month_relative_ord . $month_relative_day;
 }
 
-// Handle private booking
-// Enforce config file settings if needed
-if ($private_mandatory && !is_book_admin())
+// Handle private bookings.
+// If the area settings allow users to make private bookings then use the value from
+// the form, unless the privacy status is forced and the user is not an admin (admins
+// are allowed to make public bookings if they want, even if the status is forced).
+// Otherwise the booking is not private, unless the status is forced, in which case
+// the default applies, whether or not the user is an admin.
+if ($private_enabled)
 {
-  $isprivate = $private_default;
+  $is_private = (!is_book_admin() && $private_mandatory) ? $private_default : (bool) $private;
 }
 else
 {
-  $isprivate = (bool) $private;
+  $is_private = ($private_mandatory) ? $private_default : false;
 }
 
 // Make sure the area corresponds to the room that is being booked
@@ -422,6 +426,10 @@ if ($is_ajax && $commit)
     {
       switch ($var)
       {
+        case 'rep_type':
+          // If it's a series we're just going to change this entry
+          $$var = RepeatRule::NONE;
+          break;
         case 'rooms':
           $rooms = array($old_booking['room_id']);
           break;
@@ -577,9 +585,10 @@ if ($enable_periods)
 // Round down the starttime and round up the endtime to the nearest slot boundaries
 // (This step is probably unnecessary now that MRBS always returns times aligned
 // on slot boundaries, but is left in for good measure).
-$am7 = get_start_first_slot($start_month, $start_day, $start_year);
-$start_time = round_t_down($start_time, $resolution, $am7);
-$end_time = round_t_up($end_time, $resolution, $am7);
+$start_first_slot = get_start_first_slot($start_month, $start_day, $start_year);
+$start_time = round_t_down($start_time, $resolution, $start_first_slot);
+$start_first_slot = get_start_first_slot($end_month, $end_day, $end_year);
+$end_time = round_t_up($end_time, $resolution, $start_first_slot);
 
 // If they asked for 0 minutes, and even after the rounding the slot length is still
 // 0 minutes, push that up to 1 resolution unit.
@@ -588,20 +597,9 @@ if ($end_time == $start_time)
   $end_time += $resolution;
 }
 
-if (isset($rep_type) && ($rep_type != RepeatRule::NONE) && isset($rep_end_date))
-{
-  // Get the repeat entry settings
-  if (false === ($date = DateTime::createFromFormat('Y-m-d', $rep_end_date)))
-  {
-    throw new Exception("Invalid rep_end_date '$rep_end_date'");
-  }
-  $date->setTime(intval($start_seconds/SECONDS_PER_HOUR), intval(($start_seconds%SECONDS_PER_HOUR)/60));
-  $rep_end_time = $date->getTimestamp();
-}
-else
+if (!isset($rep_type))
 {
   $rep_type = RepeatRule::NONE;
-  $rep_end_time = 0;  // to avoid an undefined variable notice
 }
 
 if (!isset($rep_day))
@@ -630,11 +628,12 @@ if ($repeat_rule->getType() != RepeatRule::NONE)
   }
   if (isset($rep_end_date))
   {
-    $repeat_end_date = DateTime::createFromFormat('Y-m-d', $rep_end_date);
+    $repeat_end_date = DateTime::createFromFormat(DateTime::ISO8601_DATE, $rep_end_date);
     if ($repeat_end_date === false)
     {
       throw new Exception("Could not create repeat end date");
     }
+    $repeat_end_date->setTime(intval($start_seconds/SECONDS_PER_HOUR), intval(($start_seconds%SECONDS_PER_HOUR)/60));
     $repeat_rule->setEndDate($repeat_end_date);
   }
 
@@ -649,9 +648,9 @@ if ($repeat_rule->getType() != RepeatRule::NONE)
   // other words make sure that the first starttime defines an actual
   // entry.   We need to do this because if we are going to construct an iCalendar
   // object, RFC 5545 demands that the start time is the first event of
-  // a series.  ["The "DTSTART" property for a "VEVENT" specifies the inclusive
+  // a series.  ['The "DTSTART" property for a "VEVENT" specifies the inclusive
   // start of the event.  For recurring events, it also specifies the very first
-  // instance in the recurrence set."]
+  // instance in the recurrence set.']
 
   // Get the first entry in the series and make that the start time
   $reps = $repeat_rule->getRepeatStartTimes($start_time, 1);
@@ -735,6 +734,20 @@ $vars = array('view'      => $view ?? $default_view,
               'area'      => $area,
               'room'      => $room);
 
+// If we're going back to the index page then add any scroll positions to the
+// query string so that the JavaScript can scroll back to the same position.
+if ('index.php' == basename(parse_url($returl, PHP_URL_PATH)))
+{
+  foreach (['top', 'left'] as $var)
+  {
+    $$var = get_form_var($var, 'string');
+    if (isset($$var))
+    {
+      $vars[$var] = $$var;
+    }
+  }
+}
+
 $returl .= '?' . http_build_query($vars, '', '&');
 
 
@@ -773,7 +786,6 @@ foreach ($rooms as $room_id)
   $booking['room_id'] = $room_id;
   $booking['start_time'] = $start_time;
   $booking['end_time'] = $end_time;
-  $booking['end_date'] = $rep_end_time;
   $booking['ical_uid'] = $ical_uid;
   $booking['ical_sequence'] = $ical_sequence;
   $booking['ical_recur_id'] = $ical_recur_id;
@@ -796,7 +808,7 @@ foreach ($rooms as $room_id)
   // (Note: the statuses fields are the only ones that can differ by room)
 
   // Privacy status
-  $booking['private'] = (bool) $isprivate;
+  $booking['private'] = (bool) $is_private;
 
   // If we are using booking approvals then we need to work out whether the
   // status of this booking is approved.   If the user is allowed to approve
@@ -931,12 +943,9 @@ else
 
 echo "<div id=\"submit_buttons\">\n";
 
-$form = new Form();
+$form = new Form(Form::METHOD_POST);
 
-$form->setAttributes(array(
-    'method' => 'post',
-    'action' => multisite(this_page())
-  ));
+$form->setAttributes(array('action' => multisite(this_page())));
 
 // Back button
 $submit = new ElementInputSubmit();

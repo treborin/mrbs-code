@@ -176,10 +176,10 @@ as long as it is in the permitted set, ie a letter, number or underscore.
 restrictions on the characters allowed in order to simplify the code. For
 a technical explanation see below).
 
-At the moment only text, varchar, date (user table only), decimal/numeric,
-int, smallint and tinyint columns are  supported, displayed as textarea, text,
-date, number or checkbox fields as appropriate.  Whether a varchar is displayed
-as a text or textarea input depends on its maximum length, with the breakpoint
+At the moment only text, varchar, date, decimal/numeric, int, smallint and
+tinyint columns are  supported, displayed as textarea, text, date, number
+or checkbox fields as appropriate.  Whether a varchar is displayed as a text
+or textarea input depends on its maximum length, with the breakpoint
 determined by a configuration variable. Ints are treated as integer types, as
 you would expect.   However smallints and tinyints are assumed to be booleans
 and are displayed as checkboxes.
@@ -395,6 +395,11 @@ Then define your database connection parameters. Set the values for:
     $db_database =  The name of the database containing the MRBS tables.
     $db_login =     The database login username
     $db_password =  The database login password for the above login username
+
+If you are using cPanel on your web server, make sure you include the prefix,
+typically 8 characters followed by an underscore, in your database name and
+database username.  For example $db_database = "abcdefgh_mrbs". (Note: this
+prefix is not the same as the table prefix below.)
 
 If the database server and web server are the same machine, use
 $db_host="localhost". Or, with PostgreSQL only, you can use $db_host="" to

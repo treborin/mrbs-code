@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require "defaultincludes.inc";
@@ -114,9 +115,6 @@ else
 
 if (empty($errors))
 {
-  // Used purely for the syntax_casesensitive_equals() call below, and then ignored
-  $sql_params = array();
-
   // Start a transaction
   db()->begin();
 

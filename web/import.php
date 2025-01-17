@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use DateTimeZone;
@@ -641,7 +642,7 @@ function get_file_details_url(string $file) : array
 }
 
 
-function get_file_details_calendar($file) : array
+function get_file_details_calendar(array $file) : array
 {
   $files = array();
   $files[] = array('name'     => $file['name'],
@@ -651,7 +652,7 @@ function get_file_details_calendar($file) : array
 }
 
 
-function get_file_details_bzip2($file) : array
+function get_file_details_bzip2(array $file) : array
 {
   // It's not possible to get the uncompressed size of a bzip2 file without first
   // decompressing the whole file
@@ -662,7 +663,7 @@ function get_file_details_bzip2($file) : array
   return $files;
 }
 
-function get_file_details_gzip($file) : array
+function get_file_details_gzip(array $file) : array
 {
   // Get the uncompressed size of the gzip file which is stored in the last four
   // bytes of the file, little-endian
@@ -686,7 +687,7 @@ function get_file_details_gzip($file) : array
 }
 
 
-function get_file_details_zip($file) : array
+function get_file_details_zip(array $file) : array
 {
   $files = array();
 
@@ -754,7 +755,7 @@ function get_file_details_zip($file) : array
 }
 
 
-function get_details($file)
+function get_details($file) : array
 {
   $result = array();
 
@@ -1049,7 +1050,7 @@ $area_room_delimiter = get_form_var('area_room_delimiter', 'string', $default_ar
 $area_room_create = get_form_var('area_room_create', 'string', '0');
 $import_default_type = get_form_var('import_default_type', 'string', $default_type);
 $import_past = get_form_var('import_past', 'string', ((empty($default_import_past)) ? '0' : '1'));
-$skip = get_form_var('skip', 'string', ((empty($skip_default)) ? '0' : '1'));
+$skip = get_form_var('skip', 'bool', empty($skip_default));
 
 // Check the CSRF token if we're being asked to import data
 if (!empty($import))
@@ -1093,34 +1094,44 @@ if (!empty($import))
   }
   else
   {
-    if ($_FILES['upload_file']['error'] !== UPLOAD_ERR_OK)
-      {
-      echo "<p>\n";
-      echo get_vocab("upload_failed");
-      switch ($_FILES['upload_file']['error'])
-      {
-        case UPLOAD_ERR_INI_SIZE:
-          echo "<br>\n";
-          echo get_vocab("max_allowed_file_size") . " " . ini_get('upload_max_filesize');
-          break;
-        case UPLOAD_ERR_NO_FILE:
-          echo "<br>\n";
-          echo get_vocab("no_file");
-          break;
-        default:
-          // None of the other possible errors would make much sense to the user, but should be reported
-          trigger_error($_FILES['upload_file']['error'], E_USER_NOTICE);
-          break;
-      }
-      echo "</p>\n";
-    }
-    elseif (!is_uploaded_file($_FILES['upload_file']['tmp_name']))
+    if (($_FILES['upload_file']['error'] !== UPLOAD_ERR_OK) ||
+        !is_uploaded_file($_FILES['upload_file']['tmp_name']))
     {
-      // This should not happen and if it does may mean that somebody is messing about
       echo "<p>\n";
       echo get_vocab("upload_failed");
+
+      if ($_FILES['upload_file']['error'] !== UPLOAD_ERR_OK)
+      {
+        try
+        {
+          throw new UploadException($_FILES['upload_file']['error']);
+        }
+        catch (UploadException $e)
+        {
+          switch ($e->getCode())
+          {
+            case UPLOAD_ERR_INI_SIZE:
+            case UPLOAD_ERR_FORM_SIZE:
+              echo "<br>\n" . get_vocab("max_allowed_file_size", ini_get('upload_max_filesize'));
+              break;
+            case UPLOAD_ERR_NO_FILE:
+              echo "<br>\n" . get_vocab("no_file");
+              break;
+            default:
+              // None of the other possible errors would make much sense to the user, but should be reported
+              trigger_error($e->getMessage(), E_USER_WARNING);
+              break;
+          }
+        }
+      }
+      // Check this last, as it will be true if there is an error
+      elseif (!is_uploaded_file($_FILES['upload_file']['tmp_name']))
+      {
+        // This should not happen and if it does may mean that somebody is messing about
+        trigger_error("Attempt to import a file that has not been uploaded", E_USER_WARNING);
+      }
+
       echo "</p>\n";
-      trigger_error("Attempt to import a file that has not been uploaded", E_USER_WARNING);
     }
     else
     {
@@ -1189,10 +1200,9 @@ foreach ($compression_wrappers as $compression_wrapper)
 }
 echo "</ul>\n";
 
-$form = new Form();
+$form = new Form(Form::METHOD_POST);
 
 $form->setAttributes(array('class'   => 'standard',
-                           'method'  => 'post',
                            'enctype' => 'multipart/form-data',
                            'action'  => multisite(this_page())));
 

@@ -1,7 +1,9 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Auth\AuthFactory;
+use MRBS\Session\Session;
 use MRBS\Session\SessionFactory;
 
 
@@ -22,7 +24,7 @@ function auth()
 
 
 // Convenience wrapper function to provide access to a Session object
-function session()
+function session() : Session
 {
   global $auth;
 
@@ -110,6 +112,8 @@ function get_page_level($page)
     // made within the page to prevent ordinary users gaining access to admin features.
     case 'admin.php':
     case 'approve_entry_handler.php':   // Ordinary users are allowed to remind admins
+    case 'edit_message.php':            // Booking admins can edit messages
+    case 'edit_message_handler.php':    // Booking admins can edit messages
     case 'edit_room.php':               // Ordinary users can view room details
     case 'edit_users.php':              // Ordinary users can edit their own details
     case 'pending.php':                 // Ordinary users can view their own entries
@@ -126,19 +130,7 @@ function get_page_level($page)
       return booking_level();
       break;
 
-    // These pages only contain admin features
-    case 'add.php':                     // Adds a room
-    case 'del.php':                     // Deletes a room
-    case 'del_entries.php':             // Ajax page for bulk deletion of entries
-    case 'edit_area.php':
-    case 'edit_area_handler.php':
-    case 'edit_room_handler.php':
-    case 'import.php':
-    case 'kiosk.php':
-    case 'report.php':
-      $result = 2;
-      break;
-
+    // Everything else is for admins only
     default:
       $result = (isset($max_level)) ? $max_level : 2;
       break;
@@ -170,7 +162,7 @@ function get_page_level($page)
  *   false - The user does not have the required access
  *   true  - The user has the required access
  */
-function getAuthorised($level, $returl)
+function getAuthorised($level, $returl) : bool
 {
   // If the minimum level is zero (or not set) then they are
   // authorised, whoever they are
@@ -363,7 +355,7 @@ function showAccessDenied($view=null, $view_all=null, $year=null, $month=null, $
 
 
 // Checks whether the current user has admin rights
-function is_admin()
+function is_admin() : bool
 {
   global $max_level;
 
@@ -387,7 +379,7 @@ function is_admin()
 //
 // Returns:  TRUE if the user is allowed has booking admin rights for
 //           the room(s); otherwise FALSE
-function is_book_admin($rooms=null, $all=true)
+function is_book_admin($rooms=null, $all=true) : bool
 {
   global $min_booking_admin_level;
 
@@ -435,7 +427,7 @@ function is_book_admin($rooms=null, $all=true)
 
 
 // Checks whether the current user has user editing rights
-function is_user_admin()
+function is_user_admin() : bool
 {
   global $min_user_editing_level;
 
@@ -447,7 +439,7 @@ function is_user_admin()
 
 // Checks whether a room is visible to the current user
 // Doesn't do anything at the moment, but allows for customisation or future development
-function is_visible($room)
+function is_visible($room) : bool
 {
   return true;
 }
@@ -495,5 +487,5 @@ function can_see_email_addresses() : bool
   }
 
   // Otherwise the email field in the users table must not be private
-  return (($auth['type'] != 'db') || empty($is_private_field['users.email']));
+  return (!auth()->canCreateUsers() || empty($is_private_field['users.email']));
 }

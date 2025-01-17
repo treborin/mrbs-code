@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use IntlDateFormatter;
@@ -328,12 +329,26 @@ $min_booking_date = "2012-04-23";  // Must be a string in the format "yyyy-mm-dd
 // min and max delete ahead settings.
 $approved_bookings_cannot_be_changed = false;
 
-// Set this to true if you want to prevent users having a booking for two different rooms
+// Set this to true if you want to prevent users having a booking for multiple rooms
 // at the same time.
 $prevent_simultaneous_bookings = false;
 
-// Set this to true if you want to prevent bookings of a type that is invalid for a room
+// The maximum number of simultaneous bookings allowed if $prevent_simultaneous_bookings is true.
+$max_simultaneous_bookings = 1;
+
+// Whether to count simultaneous bookings just in the area concerned (true), or globally (false).
+// NOTE: it only makes sense to count globally if all the enabled areas are in "times" mode; or
+// they are in "periods" mode and the periods in each area correspond to the same time; or there
+// is only one area.
+$simultaneous_ignore_other_areas = false;
+
+// Set this to true if you want to prevent bookings of a type that is invalid for a room or day of the week
 $prevent_invalid_types = true;
+
+// Provided $prevent_invalid_types is set to true, this can be used to specify a set of days of the
+// week (0 = Sunday) that are invalid for a certain type.  For example
+// $invalid_types_days['I'] = [1, 3] means that bookings of type 'I' cannot be made on Mondays or Wednesdays.
+$invalid_types_days = array();
 
 // The start of the booking day when using periods.  Because MRBS has
 // no notion of when periods actually occur they are assumed to start
@@ -390,8 +405,11 @@ $holidays = array();
 // by defining some custom CSS for the .hidden_day class.
 $hidden_days = array();
 
-// Whether or not to display the timezone
+// Whether to display the timezone
 $display_timezone = false;
+
+// Whether to scroll automatically so that the current time slot is in view
+$autoscroll = true;
 
 // Results per page for searching:
 $search["count"] = 20;
@@ -421,7 +439,7 @@ $kiosk_mode_enabled = false;
 $kiosk_default_mode = 'room';
 
 // Whether to show a QR code in kiosk mode
-// Note that PHP 7.4 or greater is required for a QR code
+// Note that PHP 7.4 or greater and the mbstring extension are required for a QR code
 $kiosk_QR_code = true;
 
 // Timeout if the exit kiosk mode dialog is not acted upon
@@ -436,10 +454,17 @@ $kiosk_exit_page_timeout = 10; // seconds
 // of 12.
 $monthly_view_entries_details = "both";
 
-// To show ISO week numbers in the main calendar, set this to true. The week
-// numbers are only displayed if you set $weekstarts to 1 (Monday), i.e. the
-// start of the ISO week.
+// To show week numbers in the main calendar, set this to true. The week
+// numbers are only displayed if you set $weekstarts to start on the first
+// day of the week in your locale and area's timezone.  (This assumes that
+// the PHP IntlCalendar class is available; if not, the week is assumed to
+// start on Mondays, ie the ISO stanard.)
 $view_week_number = false;
+
+// To display week numbers in the mini-calendars, set this to true. The week
+// numbers are only displayed if you set $weekstarts to the start of the week.
+// See the comment about when the week starts above.
+$mincals_week_numbers = false;
 
 // Whether or not the mini-calendars are displayed.  (Note that mini-calendars are only
 // displayed anyway if the window is wide enough.)
@@ -449,11 +474,6 @@ $display_mincals = true;
 // setting the following variable to true they will be displayed above the main calendar,
 // provided the window is high enough.
 $display_mincals_above = false;
-
-// To display week numbers in the mini-calendars, set this to true. The week
-// numbers are only displayed if you set $weekstarts to 1 (Monday), i.e. the
-// start of the ISO week.
-$mincals_week_numbers = false;
 
 // To display the endtime in the slot description, eg '09:00-09:30' instead of '09:00', set
 // this to true.
@@ -575,6 +595,12 @@ $state_duration = 0;
 // Whether to sort users by their last names or not
 $sort_users_by_last_name = false;
 
+// When viewing all rooms in the week or month views, it can be very difficult to pick out an individual
+// slot, which could be just one pixel wide.  Therefore, the user is taken to the day view first unless
+// there's only one slot per day.  If $view_all_always_go_to_day_view is set to true, then we always go to
+// the day view first, regardless of the number of slots.
+$view_all_always_go_to_day_view = false;
+
 
 /***********************
  * Date and time formats
@@ -623,6 +649,13 @@ $datetime_formats['date'] = array(
   'time_type' => IntlDateFormatter::NONE
 );
 
+// By default the datepickers use a date format appropriate to the locale.  If you want to
+// override this, set 'pattern' as required, eg to 'y-MM-dd' for ISO8601 format.  Note: only
+// the 'pattern' key is recognised.
+$datetime_formats['datepicker'] = array(
+  'pattern' => null
+);
+
 // The format used for dates with times
 $datetime_formats['date_and_time'] = array(
   'date_type' => IntlDateFormatter::FULL,
@@ -663,6 +696,14 @@ $datetime_formats['day_name_edit'] = array(
   'pattern' => 'ccc'
 );
 
+// The format for ranges with both dates and times
+// Note: this setting only accepts 'date_type' and 'time_type' keys
+// and ignores 'pattern' and 'skeleton' keys.
+$datetime_formats['range_datetime'] = array(
+  'date_type' => IntlDateFormatter::MEDIUM,
+  'time_type' => IntlDateFormatter::SHORT
+);
+
 // The format used for times
 $datetime_formats['time'] = array(
   'date_type' => IntlDateFormatter::NONE,
@@ -698,22 +739,10 @@ $datetime_formats['view_week_day_date_month'] = array(
   'pattern' => 'EEE, MMM d'
 );
 
-// The title of the week view calendar when the years and
-// months are the same for the start and end of the week
-$datetime_formats['view_week_date'] = array(
-  'skeleton' => 'd',
-  'pattern' => 'd'
-);
-
-// The title of the week view calendar when just the years
-// are the same for the start and end of the week
-$datetime_formats['view_week_month'] = array(
-  'skeleton' => 'dMMMM',
-  'pattern' => 'MMMM d'
-);
-
-// The title of the week view calendar (end of the week)
-$datetime_formats['view_week_year'] = array(
+// The title of the week view calendar
+// Note: this setting only accepts 'date_type' and 'time_type' keys
+// and ignores 'pattern' and 'skeleton' keys.
+$datetime_formats['view_week'] = array(
   'date_type' => IntlDateFormatter::LONG,
   'time_type' => IntlDateFormatter::NONE
 );
@@ -722,6 +751,31 @@ $datetime_formats['view_week_year'] = array(
 $datetime_formats['week_number'] = array(
   'pattern' => 'w'
 );
+
+// Sometimes if the server's ICU library is out of date and cannot easily be updated
+// it can be better to use the IntlDateFormatter emulation and strftime(), even if the
+// 'intl' extension is installed.  To do this set the variable below to true.
+$force_srtftime = false;
+
+
+/***************
+ * ICU overrides
+ * *************/
+
+// Sometimes we may want to override the standard ICU library settings,
+// for example if the ICU library on the server is out of date and can't
+// be updated.  This can be done by setting:
+//
+// $icu_override[<locale>]['first_day_of_week'] and/or
+// $icu_override[<locale>]['minimal_days_in_first_week']
+//
+// where <locale> is a valid locale in BCP 47 format and both settings take
+// integer values in the range 1..7 (IntlCalendar days start with Sunday = 1).
+
+// For example:
+//
+// $icu_override['en-AU']['first_day_of_week'] = 2; // Monday
+// $icu_override['en-AU']['minimal_days_in_first_week'] = 1;
 
 
 /************************
@@ -754,6 +808,10 @@ $show_plus_link = false;   // Change to true to always show the (+) link as in
 // working with a very large LDAP directory, and it can be better just to retrieve
 // each name when needed.
 $get_display_names_all_at_once = true;
+
+// HTML tags that are allowed to be used in the message above the calendar.
+// This should be an array of tags, eg ['a', 'span'].
+$message_allowed_tags = [];
 
 // PRIVATE BOOKINGS SETTINGS
 
@@ -788,7 +846,6 @@ $reminder_interval = 60*60*24*2;  // 2 working days
 
 // Days of the week that are working days (Sunday = 0, etc.)
 $working_days = array(1,2,3,4,5);  // Mon-Fri
-
 
 // SETTINGS FOR BOOKING CONFIRMATION
 
@@ -987,6 +1044,7 @@ $csrf_cookie["secret"] = "This still isn't a very good secret!";
 // Configuration parameters for 'php' session scheme
 
 // The session name
+// Unset this in your config file if you want to use the default session name
 $auth["session_php"]["session_name"] = 'MRBS_SESSID';
 
 // The expiry time of a session cookie, in seconds.  Set it to 0 for the
@@ -1007,6 +1065,13 @@ $auth["session_php"]["session_expire_time"] = (60*60*24*30); // 30 days
 // be the case if you have JavaScript disabled on the client.
 $auth["session_php"]["inactivity_expire_time"] = 0; // seconds
 
+// Normally, provided the server is running PHP 7.3 or above,  the session cookies
+// are issued with SameSite attribute of "Strict", unless the session type requires
+// "Lax", eg for CAS and Saml. However, this can be inconvenient for users who might
+// access MRBS from more than one site and expect their login status to be retained.
+// By setting the variable below to true, the attribute can be relaxed to "Lax",
+// although this does trade off some security.
+$cookie_samesite_lax = false;
 
 // Cookie path override. If this value is set it will be used by the
 // 'php' and 'cookie' session schemes to override the default behaviour
@@ -1024,7 +1089,7 @@ $auth["session_php"]["inactivity_expire_time"] = 0; // seconds
 // for whom admin rights are defined here.   After that this list is ignored.
 unset($auth["admin"]);              // Include this when copying to config.inc.php
 $auth["admin"][] = "127.0.0.1";     // localhost IP address. Useful with IP sessions.
-$auth["admin"][] = "administrator"; // A user name from the user list. Useful
+$auth["admin"][] = "administrator"; // A username from the user list. Useful
                                     // with most other session schemes.
 //$auth["admin"][] = "10.0.0.1";
 //$auth["admin"][] = "10.0.0.2";
@@ -1095,8 +1160,8 @@ $auth['cas']['no_server_validation'] = false;
 
 // Filtering by attribute
 // The next two settings allow you to use CAS attributes to require that a user must have certain
-// attributes, otherwise their access level will be zero.  In other words unless they ahave the required
-// attributes they will be able to login successfully, but then won't have any more rights than an
+// attributes, otherwise their access level will be zero.  In other words unless they have the required
+// attributes they will be able to log in successfully, but then won't have any more rights than an
 // unlogged in user.
 // $auth['cas']['filter_attr_name'] = ''; // eg 'department'
 // $auth['cas']['filter_attr_values'] = ''; // eg 'DEPT01', or else an array, eg array('DEPT01', 'DEPT02');
@@ -1142,7 +1207,8 @@ $auth['db_ext']['column_name_password'] = 'password';
 $auth['db_ext']['column_name_email'] = 'email';
 // Below is an example if you want to put the MRBS user level in the DB
 //$auth['db_ext']['column_name_level'] = 'mrbs_level';
-// Either 'password_hash' (from PHP 5.5.0), 'md5', 'sha1', 'sha256', 'crypt' or 'plaintext'
+// Can be 'password_hash', 'crypt', 'plaintext' or any algorithm supported
+// by the PHP hash() function, eg 'md5', 'sha1', 'sha256'.
 $auth['db_ext']['password_format'] = 'md5';
 
 // 'auth_ldap' configuration settings
@@ -1332,7 +1398,13 @@ $auth['saml']['attr']['username'] = 'sAMAccountName';
 $auth['saml']['attr']['mail'] = 'mail';
 $auth['saml']['attr']['givenName'] = 'givenname';
 $auth['saml']['attr']['surname'] = 'sn';
+// If you want to configure admins in the config file rather than by using SAML
+// attributes, then add the line
+// unset($auth['saml']['admin']);
+// to your config file.
 $auth['saml']['admin']['memberOf'] = ['CN=Domain Admins,CN=Users,DC=example,DC=com'];
+// Optional access control filter
+//$auth['saml']['user']['memberOf'] = ['CN=Calendar Users,CN=Users,DC=example,DC=com'];
 // MRBS session initialisation can interfere with session handling in some
 // SAML libraries.  If so, set this to true.
 $auth['saml']['disable_mrbs_session_init'] = false;
@@ -1614,7 +1686,12 @@ $mail_settings['icalendar'] = false; // Set to true to include iCalendar details
 // HOW TO EMAIL - LANGUAGE
 // -----------------------------------------
 
-// Set the language used for emails (choose an available lang.* file).
+// Set the language used for emails.  This should be in the form of a BCP 47
+// language tag, eg 'en-GB'.  MRBS will use the language tag to set the locale
+// for date and time formats, and find the best match in the lang.* files for
+// translations.  For example, setting the admin_lang to 'en' will give English
+// text and am/pm style times; setting it to 'en-GB' will give English text with
+// 24-hour times.
 $mail_settings['admin_lang'] = 'en';   // Default is 'en'.
 
 
@@ -1789,6 +1866,7 @@ $default_sumby = 'd';
 
 // Default file names
 $report_filename  = "report";
+$search_filename  = "search";
 $summary_filename = "summary";
 
 // CSV format
@@ -1807,6 +1885,24 @@ $csv_col_sep = ",";   // Separator between columns/fields
 $csv_charset = 'utf-8';
 $csv_bom = false;
 
+// UNAUTHENTICATED GET REQUESTS TO REPORT.PHP
+// These allow calendar programs to subscribe to MRBS, by using for example
+// path_to_mrbs/report.php?phase=2&output_format=2
+
+// Set this to true to allow unauthenticated GET requests to report.php
+$report_unauthenticated_get_enabled = false;
+
+// Set this to TRUE to require a key in the query string for unauthenticated
+// GET requests to report.php.  For example report.php?phase=2&output_format=2&key=secret
+$report_keys_enabled = false;
+
+// An array of valid keys
+$report_keys = [];  // An array of strings
+
+// If unauthenticated GET requests are allowed then only bookings in rooms
+// or areas that are open will be shown.
+$report_open_areas = []; // An array of integer area ids
+$report_open_rooms = []; // An array of integer room ids
 
 /*************
  * iCalendar

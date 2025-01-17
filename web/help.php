@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require "defaultincludes.inc";
@@ -43,7 +44,7 @@ else
   echo "<table class=\"details has_caption list\">\n";
   echo "<caption>" . get_vocab("server_details") . "</caption>\n";
   echo "<tr><td>" . get_vocab("database") . "</td><td>" . db()->version() . "</td></tr>\n";
-  echo "<tr><td>" . get_vocab("system") . "</td><td>" . php_uname() . "</td></tr>\n";
+  echo "<tr><td>" . get_vocab("system") . "</td><td>" . System::info() . "</td></tr>\n";
   echo "<tr><td>" . get_vocab("servertime") . "</td><td>" .
        datetime_format($datetime_formats['date_and_time_help'], time()) .
        "</td></tr>\n";
@@ -51,7 +52,7 @@ else
        htmlspecialchars(get_server_software()) . "</td></tr>\n";
   echo "<tr><td>PHP</td><td>" . phpversion() . "</td></tr>\n";
 
-  // The PHP extensions loaded ,particularly intl and mbstring, are useful for debugging.
+  // The PHP extensions loaded, particularly intl and mbstring, are useful for debugging.
   $extensions = get_loaded_extensions();
   asort($extensions);
   echo "<tr><td>" . get_vocab("extensions") . "</td><td>" .

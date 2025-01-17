@@ -1,5 +1,5 @@
 <?php
-
+declare(strict_types=1);
 namespace MRBS\Form;
 
 class ElementInputHidden extends ElementInput
@@ -10,16 +10,18 @@ class ElementInputHidden extends ElementInput
     parent::__construct();
     $this->setAttribute('type', 'hidden');
 
-    if (isset($name) && isset($value))
+    if (isset($name))
+    {
+      $this->setAttribute('name', $name);
+    }
+
+    if (isset($value))
     {
       if (is_bool($value))
       {
         $value = ($value) ? 1 : 0;
       }
-      $this->setAttributes(array(
-          'name'  => $name,
-          'value' => $value)
-        );
+      $this->setAttribute('value', $value);
     }
   }
 

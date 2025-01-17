@@ -82,6 +82,11 @@ class AuthSaml extends Auth
   {
     global $auth;
 
+    if (!isset($auth['saml']['admin']))
+    {
+      return $this->getDefaultLevel($username);
+    }
+
     $userData = \MRBS\session()->ssp->getAttributes();
     $current_username = \MRBS\session()->getUsername();
 
@@ -99,6 +104,24 @@ class AuthSaml extends Auth
             }
           }
         }
+      }
+
+      if (isset($auth['saml']['user']))
+      {
+        foreach ($auth['saml']['user'] as $attr => $values)
+        {
+          if (array_key_exists($attr, $userData))
+          {
+            foreach ($values as $value)
+            {
+              if (in_array($value, $userData[$attr]))
+              {
+                return 1;
+              }
+            }
+          }
+        }
+        return  0;
       }
 
       return 1;

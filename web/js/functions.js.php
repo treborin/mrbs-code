@@ -1,17 +1,14 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require "../defaultincludes.inc";
 
 http_headers(array("Content-type: application/x-javascript"),
              60*30);  // 30 minute expiry
-
-if ($use_strict)
-{
-  echo "'use strict';\n";
-}
-
 ?>
+
+'use strict';
 
 // Decodes a base64 encoded string.  Returns false if it can't be decoded.
 // See https://stackoverflow.com/questions/30106476/using-javascripts-atob-to-decode-base64-doesnt-properly-decode-utf-8-strings
@@ -35,10 +32,17 @@ function base64Decode(string)
   return decoder.decode(bytes);
 }
 
+<?php
 // Fix for iOS 13 where the User Agent string has been changed.
 // See https://github.com/flatpickr/flatpickr/issues/1992
+?>
 function isIos()
 {
+  <?php
+  // Note that the platform property is deprecated, but is used here
+  // as a last resort for older browsers. When it is removed from newer
+  // browsers it will just be undefined and the code should still work.
+  ?>
   return (window.navigator.userAgent.match(/iPad/i) ||
           window.navigator.userAgent.match(/iPhone/i) ||
           /iPad|iPhone|iPod/.test(navigator.platform) ||
@@ -52,6 +56,13 @@ function isMobile()
 
 $.fn.reverse = [].reverse;
 
+$.fn.isHScrollable = function () {
+  return this[0].scrollWidth > this[0].clientWidth;
+};
+
+$.fn.isVScrollable = function () {
+  return this[0].scrollHeight > this[0].clientHeight;
+};
 
 jQuery.fn.extend({
 
@@ -321,9 +332,10 @@ function getParameterByName(name, url)
 												rec.right - wPosition.left > 0  && rec.right < vpWidth + wPosition.left  :
 												rec.right > 0 && rec.right <= vpWidth,
                 vVisible   = partial ? tViz || bViz : tViz && bViz,
-                hVisible   = partial ? lViz || rViz : lViz && rViz,
-		vVisible = (rec.top < 0 && rec.bottom > vpHeight) ? true : vVisible,
-                hVisible = (rec.left < 0 && rec.right > vpWidth) ? true : hVisible;
+                hVisible   = partial ? lViz || rViz : lViz && rViz;
+
+            vVisible = (rec.top < 0 && rec.bottom > vpHeight) ? true : vVisible;
+            hVisible = (rec.left < 0 && rec.right > vpWidth) ? true : hVisible;
 
             if(direction === 'both')
                 return clientSize && vVisible && hVisible;

@@ -1,16 +1,14 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 require "../defaultincludes.inc";
 
 http_headers(array("Content-type: application/x-javascript"),
              60*30);  // 30 minute expiry
-
-if ($use_strict)
-{
-  echo "'use strict';\n";
-}
 ?>
+
+'use strict';
 
 $(document).on('page_ready', function() {
 
@@ -29,7 +27,7 @@ $(document).on('page_ready', function() {
         // list so that they can be pasted into an address field in an email client.
         // Useful for sending messages to those booked on a certain day or in a certain room.
         ?>
-        text: '<?php echo escape_js(get_vocab('copy_email_addresses')) ?>',
+        text: '<?php echo get_js_vocab('copy_email_addresses') ?>',
         action: function (e, dt, node, config) {
           <?php // Don't sort the addresses because it makes comparison with the table easier ?>
           extractEmailAddresses(dt, '.name', false);
